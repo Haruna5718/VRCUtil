@@ -1,0 +1,7 @@
+{
+	"AutoStart": true,
+	"AutoUpdate": false,
+	"OSCHost": "127.0.0.1",
+	"OSCIn": "9000",
+	"OSCOut": "9001"
+}

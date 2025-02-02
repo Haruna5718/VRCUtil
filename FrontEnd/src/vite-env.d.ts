@@ -11,5 +11,7 @@ declare global {
       };
       SetValue:any;
       GetValue:any;
+      ModuleState:any;
+      Notice:any;
   }
 }

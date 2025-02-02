@@ -2,6 +2,7 @@
     export let LayoutValue:{[key: string]: any}={};
     export let Text:string;
     export let Attr:{[key: string]: string}={};
+    export let ModuleName:string = "";
 
     function ConvertText(source) {
 		const grouped = [];
@@ -16,7 +17,7 @@
 	}
 </script>
 {#if (LayoutValue[Attr.type]??"text")=="text"}
-    <button class="button" disabled={LayoutValue[Attr.disable]} on:click={()=>window.GetValue(Attr.value,true)} style="
+    <button class="button" disabled={LayoutValue[Attr.disable]} on:click={()=>window.GetValue(ModuleName, Attr.value,true)} style="
         color: {LayoutValue[Attr.color] ?? '#fff'};
         background-color: {LayoutValue[Attr.background] ?? '#454545'};
         font-size: {LayoutValue[Attr.size] ?? '16px'};
@@ -50,7 +51,7 @@
         <slot />
     </a>
 {:else if LayoutValue[Attr.type]=="toggle"}
-    <button class="button" disabled={LayoutValue[Attr.disable]} class:active={LayoutValue[Attr.value]} on:click={()=>window.GetValue(Attr.value,!LayoutValue[Attr.value])} style="
+    <button class="button" disabled={LayoutValue[Attr.disable]} class:active={LayoutValue[Attr.value]} on:click={()=>window.GetValue(ModuleName, Attr.value,!LayoutValue[Attr.value])} style="
         {LayoutValue[Attr.value]?'background-':''}color: {LayoutValue[Attr.color] ?? '#fff'};
         {LayoutValue[Attr.value]?'':'background-'}color: {LayoutValue[Attr.background] ?? '#454545'};
         font-size: {LayoutValue[Attr.size] ?? '16px'};
@@ -73,7 +74,7 @@
         padding: 8px;
         filter: brightness(100%);
 		border: 1px solid #00000020;
-        transition: filter 0.1s ease-out, border 0.1s ease-out;
+        transition: filter 0.1s ease-out, border 0.1s ease-out, color 0.1s ease-out, background-color 0.1s ease-out;
         &:not([disabled]){
             cursor: pointer;
             &:hover{

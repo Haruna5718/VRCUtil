@@ -43,29 +43,31 @@
     
     export let LayoutData:LayoutDataType;
     export let LayoutValue:{[key: string]: any} = {};
+    export let ModuleName:string = "";
     
 
-    Object.values(LayoutData.Attr).forEach((v)=>{window.GetValue(v)})
-    window.GetValue(LayoutData.Text)
-
-    console.log(LayoutValue[LayoutData.Attr.value])
+    Object.values(LayoutData.Attr).forEach((v)=>{window.GetValue(ModuleName, v)})
+    window.GetValue(ModuleName, LayoutData.Text)
 
 </script>
 {#if LayoutData}
     {#if LayoutData.Type=="Repeat"}
-        {#each new Array(Number(LayoutValue[LayoutData.Attr.value])) as _,ind}
+    {@const Length=Number(LayoutValue[LayoutData.Attr.value])}
+        {#each new Array(Length?Length:0) as _,ind}
             {#each LayoutData.Children as val}
-                <Component {LayoutValue} LayoutData={SetRepeatData(structuredClone(val),ind)} />
+                <Component {LayoutValue} LayoutData={SetRepeatData(structuredClone(val),ind)} {ModuleName}/>
             {/each}
         {/each}
     {:else if LayoutData.Type=="If"}
-        {#each (LayoutData.Children?.find(data=>data.Type==(LayoutValue[LayoutData.Attr.value]?"True":"False"))?.Children) ?? [] as val}
-            <Component {LayoutValue} LayoutData={val} />
-        {/each}
+        {#key LayoutValue[LayoutData.Attr.value]}
+            {#each (LayoutData.Children?.find(data=>data.Type==(LayoutValue[LayoutData.Attr.value]?"True":"False"))?.Children) ?? [] as val}
+                <Component {LayoutValue} LayoutData={val} {ModuleName}/>
+            {/each}
+        {/key}
     {:else}
-        <svelte:component {LayoutValue} this={Components[LayoutData.Type]} Attr={LayoutData.Attr} Text={LayoutValue[LayoutData.Text]}>
+        <svelte:component {LayoutValue} this={Components[LayoutData.Type]} Attr={LayoutData.Attr} Text={LayoutValue[LayoutData.Text]} {ModuleName}>
             {#each LayoutData.Children as val}
-                <Component {LayoutValue} LayoutData={val} />
+                <Component {LayoutValue} LayoutData={val} {ModuleName}/>
             {/each}
         </svelte:component>
     {/if}

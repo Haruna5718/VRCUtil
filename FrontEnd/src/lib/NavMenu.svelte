@@ -1,13 +1,13 @@
 <script lang="ts">
-    type StateType = "offline"|"online"|"error"|"warning"
     export let Icon:string;
     export let Text:string = "";
     export let style:string = "";
     export let Select:boolean = false;
     export let Disabled:boolean = false;
-    export let Status:StateType = null;
+    export let Status:number = null;
     export let onclick = ()=>{};
     let Width: number;
+    
 </script>
 
 <button class:Select={Select} class:Disabled={Disabled} style="{style}" bind:clientWidth={Width} on:click={onclick}>
@@ -15,8 +15,8 @@
     {#if Width>=200}
         <span class="Text">{Text}</span>
     {/if}
-    {#if Status}
-        <span class="Status" style="top: {Width>=200?15:5}px; right: {Width>=200?15:5}px;" class:Offline={Status=="offline"} class:Online={Status=='online'} class:Error={Status=="error"}/>
+    {#if Status!=null}
+        <span class="Status" style="top: {Width>=200?15:5}px; right: {Width>=200?15:5}px;" class:Offline={Status==0} class:Online={Status==1} class:Active={Status==2} class:warning={Status==-1} class:Error={Status==-2}/>
     {/if}
 </button>
 <style lang="scss">
@@ -42,8 +42,14 @@
         .Online{
             background-color: #3ba000;
         }
+        .warning{
+            background-color: #f0a000
+        }
         .Error{
-            background-color: #bb0000;
+            background-color: #bb3434;
+        }
+        .Active{
+            background-color: #208fff;
         }
         .Status{
             position: absolute;
@@ -69,10 +75,15 @@
             border-radius: 1.5px;
             height: 16px;
         }
-        &.Select,&:not(.Disabled):hover{
-            background-color: #ffffff10;
+        &:not(.Disabled){
+            &.Select,&:hover{
+                background-color: #ffffff10;
+            }
             &.Select::before{
                 background-color: #fff;
+            }
+            &:active{
+                background-color: #ffffff0b;
             }
         }
         &.Disabled{

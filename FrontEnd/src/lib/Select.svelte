@@ -2,6 +2,8 @@
     export let LayoutValue:{[key: string]: any}={};
     // export let Text:string;
     export let Attr:{[key: string]: string}={};
+    export let ModuleName:string = "";
+
     let open=false
     let main=[]
 </script>
@@ -27,7 +29,7 @@
             border-radius: {LayoutValue[Attr.round] ?? '5px'};
         ">
             {#each LayoutValue[Attr.options] as val}
-                <div class="item" on:click={()=>window.GetValue(Attr.value,!LayoutValue[Attr.value])} style="
+                <div class="item" on:click={()=>window.GetValue(ModuleName, Attr.value,!LayoutValue[Attr.value])} style="
                     color: {LayoutValue[Attr.color] ?? '#fff'};
                     background-color: {LayoutValue[Attr.background] ?? '#454545'};
                     font-size: {LayoutValue[Attr.size] ?? '16px'};

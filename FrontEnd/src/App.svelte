@@ -6,7 +6,6 @@
     import Input from './lib/Input.svelte';
     import Line from './lib/Line.svelte';
 	import NavMenu from './lib/NavMenu.svelte';
-    import Select from './lib/Select.svelte';
     import Space from './lib/Space.svelte';
     import Switch from './lib/Switch.svelte';
     import Vertical from './lib/Vertical.svelte';
@@ -17,22 +16,42 @@
 	let ModuleInfo = false
 
 	let LayoutData:{[key: string]:any} = {};
+	let WidgetData:{[key: string]:any} = {};
 	let LayoutValue:{[key: string]:any} = {};
 	let ModuleData:{[key: string]:any} = {};
 
+	let ModuleStatus:{[key: string]:number} = {}
+	let notices:[number, string][] = []
+
 	let hash = "";
 
+	let ReverseDatas = {}
+
 	const ValueRegex = /^\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}$/;
-	window.GetValue = (Name: string, Value:any=null) => {
-		if(!LayoutValue[hash]) LayoutValue[hash] = {}
+	window.GetValue = (ModuleName:string, Name: string, Value:any=null) => {
+		if(!LayoutValue[ModuleName]) LayoutValue[ModuleName] = {}
+		if(!ReverseDatas[ModuleName]) ReverseDatas[ModuleName] = []
 		let match = Name.match(ValueRegex);
-		if(match) {if(!LayoutValue[hash][Name]||Value!=null) window.pywebview.api.GetValue(hash,match[1],Value)}
-		else LayoutValue[hash][Name] = Name
+		if(match) {
+			if(match[1].startsWith("!")) ReverseDatas[ModuleName].push(match[1].replace("!",""))
+			if(!LayoutValue[ModuleName][Name]||Value!=null) window.pywebview.api.GetValue(ModuleName,match[1].replace("!",""),Value)
+		}
+		else LayoutValue[ModuleName][Name] = Name
 	}
 
 	window.SetValue = (ModuleName: string, Name: string, Value:any=null) => {
 		if(!LayoutValue[ModuleName]) LayoutValue[ModuleName] = {}
+		if(!ReverseDatas[ModuleName]) ReverseDatas[ModuleName] = []
+		if(ReverseDatas[ModuleName].includes(Name)) LayoutValue[ModuleName][`{!${Name}}`] = !Value;
 		LayoutValue[ModuleName][`{${Name}}`] = Value;
+	}
+
+	window.ModuleState = (ModuleName:string, state:number) => {
+		ModuleStatus[ModuleName]=state
+	}
+
+	window.Notice = (Message:string,Level:number=0) => {
+		notices=[...notices, [Level, Message]]
 	}
 
 	let RecentPages = 0;
@@ -48,15 +67,19 @@
 		while (!window.hasOwnProperty("pywebview")) await new Promise(resolve => setTimeout(resolve, 500));
 		let LoadedData = await window.pywebview.api.LoadModule()
 		LayoutData = LoadedData.LayoutData
+		WidgetData = LoadedData.WidgetData
 		ModuleData = LoadedData.ModuleData
 		window.pywebview.api.GetValue("Settings","AutoStart")
 		window.pywebview.api.GetValue("Settings","OSCHost")
 		window.pywebview.api.GetValue("Settings","OSCIn")
 		window.pywebview.api.GetValue("Settings","OSCOut")
 		window.pywebview.api.GetValue("Settings","AutoUpdate")
+		window.pywebview.api.GetValue("Settings","version")
+		window.pywebview.api.GetValue("Settings","newversion")
 		PageReady = true
 		await window.pywebview.api.InitModule()
 	})();
+	history.replaceState({i:0},"");
 </script>
 <svelte:window on:hashchange={hashChange}></svelte:window>
 <main style="grid-template-columns: 50px {PageReady&&NavOpen?180:0}px 1fr;">
@@ -67,7 +90,7 @@
 			<p>VRCUtil</p>
 		</div>
 		<div class="HeaderButtons">
-			<button on:click={()=>window.pywebview.api.ontop(!OnTop).then(v=>OnTop=v)}>{OnTop?"":""}</button>
+			<button on:click={()=>window.pywebview.api.ontop(!OnTop).then(v=>OnTop=v)}>{#if OnTop}<span style="position:absolute;left:8px;"></span>{/if}</button>
 			<button on:click={()=>window.pywebview.api.minimize()}></button> <!--  -->
 			<button on:click={()=>window.pywebview.api.destroy()}></button> <!--  -->
 		</div>
@@ -76,32 +99,32 @@
 	<nav>
 		<NavMenu Icon="" Text="DashBoard" Select={hash==""} onclick={()=>location.hash=""}/>
 		{#each Object.entries(ModuleData) as val}
-			<NavMenu Icon={val[1].DisplayIcon} Text={val[1].DisplayName} Select={hash==val[0]} onclick={()=>location.hash=val[0]} Status={"online"} />
+			<NavMenu Icon={val[1].DisplayIcon} Text={val[1].DisplayName} Select={hash==val[0]} onclick={()=>location.hash=val[0]} Status={ModuleStatus[val[0]]} />
 		{/each}
 	</nav>
 	<NavMenu Icon="" Text="Settings" Select={hash=="Settings"} onclick={()=>location.hash="Settings"} style="grid-row: 4; grid-column: 1 / 3;"/>
-
-	<div class="container">
-		{#if PageReady}
-			<div class="Title">{hash==""?"Dashboard":(ModuleData[hash]?.DisplayName??hash)}</div>
-			{#key hash}
+	{#key hash}
+		<div class="container" on:load={(e)=>e.currentTarget.scrollTo(0,0)}>
+			{#if PageReady}
+				<div class="Title">{hash==""?"Dashboard":(ModuleData[hash]?.DisplayName??hash)}</div>
 				<div class="page">
 					{#if ModuleData[hash]}
-						<Component LayoutValue={LayoutValue[hash]} LayoutData={LayoutData[hash]} />
+						<Component LayoutValue={LayoutValue[hash]} LayoutData={LayoutData[hash]} ModuleName={hash}/>
 					{:else if hash=="Settings"}
 						<Vertical>
 							<Box>
 								<Horizontal>
 									<p>Auto Start VRCUtil With SteamVR</p>
 									<Space />
-									<Switch Attr={{value:"{AutoStart}"}} LayoutValue={LayoutValue[hash]}/>
+									<Switch Attr={{value:"{AutoStart}"}} LayoutValue={LayoutValue[hash]} ModuleName={"Settings"}/>
 								</Horizontal>
 							</Box>
 							<Box>
 								<Horizontal>
-									<p>Auto Update VRCUtil When StartUp</p>
+									<p>Auto Update VRCUtil After Exit</p>
 									<Space />
-									<Switch Attr={{value:"{AutoUpdate}"}} LayoutValue={LayoutValue[hash]}/>
+									<p style="color:#888c90;">Latest {LayoutValue[hash]["{newversion}"]}</p>
+									<Switch Attr={{value:"{AutoUpdate}"}} LayoutValue={LayoutValue[hash]} ModuleName={"Settings"}/>
 								</Horizontal>
 							</Box>
 							<Box>
@@ -110,24 +133,24 @@
 									<Space />
 									<Vertical>
 										<Horizontal>
-											<p class="minitext">IP Address</p>
+											<p class="tinytext">IP Address</p>
 											<Space />
 										</Horizontal>
-										<Input Attr={{value:"value", width:"width"}} LayoutValue={{value:LayoutValue[hash]["{OSCHost}"], width:"150px"}}/>
+										<Input Attr={{value:"{OSCHost}", width:"width"}} LayoutValue={{...LayoutValue[hash], width:"150px"}} ModuleName={"Settings"}/>
 									</Vertical>
 									<Vertical>
 										<Horizontal>
-											<p class="minitext">In Port</p>
+											<p class="tinytext">Send Port</p>
 											<Space />
 										</Horizontal>
-										<Input Attr={{value:"value", width:"width"}} LayoutValue={{value:LayoutValue[hash]["{OSCIn}"], width:"60px"}}/>
+										<Input Attr={{value:"{OSCIn}", width:"width"}} LayoutValue={{...LayoutValue[hash], width:"80px"}} ModuleName={"Settings"}/>
 									</Vertical>
 									<Vertical>
 										<Horizontal>
-											<p class="minitext">Out Port</p>
+											<p class="tinytext">Receive Port</p>
 											<Space />
 										</Horizontal>
-										<Input Attr={{value:"value", width:"width"}} LayoutValue={{value:LayoutValue[hash]["{OSCOut}"], width:"60px"}}/>
+										<Input Attr={{value:"{OSCOut}", width:"width"}} LayoutValue={{...LayoutValue[hash], width:"80px"}} ModuleName={"Settings"}/>
 									</Vertical>
 								</Horizontal>
 							</Box>
@@ -137,14 +160,14 @@
 									<Vertical>
 										<Horizontal>
 											<p>VRCUtil</p>
-											<p style="color:#888c90;">2.0.0</p>
+											<p style="color:#888c90;">{LayoutValue[hash]["{version}"]}</p>
 											<Space />
 										</Horizontal>
 										<p class="minitext">© 2025. Haruna5718. All rights reserved.</p>
 									</Vertical>
 									<Space />
-									<Button Attr={{type:"type", value:"url"}} Text="Booth" LayoutValue={{"url":"https://haruna5718.booth.pm", type:"link"}}/>
-									<Button Attr={{type:"type", value:"url"}} Text="Github" LayoutValue={{"url":"https://github.com/Haruna5718", type:"link"}}/>
+									<Button Attr={{type:"type", value:"url"}} Text="Booth" LayoutValue={{"url":"https://haruna5718.booth.pm/items/6516021", type:"link"}}/>
+									<Button Attr={{type:"type", value:"url"}} Text="Github" LayoutValue={{"url":"https://github.com/Haruna5718/VRCUtil", type:"link"}}/>
 								</Horizontal>
 							</Box>
 							<Box>
@@ -158,48 +181,94 @@
 										<p class="minitext">contact@haruna5718.dev</p>
 									</Vertical>
 									<Space />
-									<Button Attr={{type:"type", value:"url"}} Text="Booth" LayoutValue={{"url":"https://haruna5718.booth.pm/items/6516021", type:"link"}}/>
-									<Button Attr={{type:"type", value:"url"}} Text="Github" LayoutValue={{"url":"https://github.com/Haruna5718/VRCUtil", type:"link"}}/>
+									<Button Attr={{type:"type", value:"url"}} Text="Booth" LayoutValue={{"url":"https://haruna5718.booth.pm", type:"link"}}/>
+									<Button Attr={{type:"type", value:"url"}} Text="Github" LayoutValue={{"url":"https://github.com/Haruna5718", type:"link"}}/>
 								</Horizontal>
 							</Box>
 						</Vertical>
 					{:else}
-						<div class=""></div>
+						<Vertical>
+							{#each Object.keys(WidgetData) as ModuleName}
+								<Component LayoutValue={LayoutValue[ModuleName]} LayoutData={WidgetData[ModuleName]} {ModuleName}/>
+							{/each}
+						</Vertical>
 					{/if}
 				</div>
-			{/key}
-		{:else}
-			<p class="WaitInit">Starting...</p>
-		{/if}
-	</div>
-	{#if ModuleData[hash]}
-		<div class="ModuleMenu" style="transform: translateY({ModuleInfo?0:100}%)">
-			<p class="button" on:click={()=>ModuleInfo=!ModuleInfo}>Module Info <span style="top: 2px;">{ModuleInfo?"":""}</span></p>
-			<div class="content">
-				<Vertical>
-					<Horizontal>
-						<p>{ModuleData[hash]?.DisplayName} <span style="color:#888c90;">{ModuleData[hash]?.Version}</span></p>
-						<Space />
-					</Horizontal>
-					<Horizontal>
-						<p class="minitext">{ModuleData[hash]?.Author}</p>
-						<Space />
-					</Horizontal>
-				</Vertical>
-				<Space />
-				{#each ModuleData[hash]?.Url as val}
-					{@const data = Object.entries(val)[0]}
-					<Button Attr={{type:"type", value:"url"}} Text="{data[0]}" LayoutValue={{"url":data[1], type:"link"}}/>
-				{/each}
-				<Line />
-				<p>{ModuleData[hash]?.Description}</p>
-				<Space />
-				<Button Attr={{value:"Remove", background:"background"}} Text="Remove" LayoutValue={{background:"#bb4747"}}/>
-			</div>
+			{:else}
+				<p class="WaitInit">Starting...</p>
+			{/if}
 		</div>
+	{/key}
+	{#if ModuleData[hash]}
+		{#key hash}
+			<div class="ModuleMenu" style="transform: translateY({ModuleInfo?0:100}%)">
+				<p class="button" on:click={()=>ModuleInfo=!ModuleInfo}>Module Info <span style="top: 2px;">{ModuleInfo?"":""}</span></p>
+				<div class="content">
+					<Vertical>
+						<Horizontal>
+							<p>{ModuleData[hash]?.DisplayName} <span style="color:#888c90;">{ModuleData[hash]?.Version}</span></p>
+							<Space />
+						</Horizontal>
+						<Horizontal>
+							<p class="minitext">{ModuleData[hash]?.Author}</p>
+							<Space />
+						</Horizontal>
+					</Vertical>
+					<Space />
+					{#each ModuleData[hash]?.Url as val}
+						{@const data = Object.entries(val)[0]}
+						<Button Attr={{type:"type", value:"url"}} Text="{data[0]}" LayoutValue={{"url":data[1], type:"link"}}/>
+					{/each}
+					<Line />
+					<p>{ModuleData[hash]?.Description}</p>
+					<Space />
+					<Button Attr={{value:"Remove", background:"background"}} Text="Remove" LayoutValue={{background:"#bb3434"}}/>
+				</div>
+			</div>
+		{/key}
 	{/if}
 </main>
+<div class="notice">
+	{#each notices as val,ind}
+		<div style="background-color:{["#1c5fb8","#3ba000","#f0a000","#bb3434"][val[0]]};">
+			<p style="top: 2px; margin-bottom:auto;">{["","","",""][val[0]]}</p>
+			<p>{val[1]}</p>
+			<p class="icon" on:click={() => { notices = notices.filter((_, i) => i !== ind); }}></p>
+		</div>
+	{/each}
+</div>
 <style lang="scss">
+	.notice{
+		position: absolute;
+		top: 50px;
+		right: 0px;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column-reverse;
+		gap: 5px;
+		padding: 20px;
+		&>div{
+			overflow: hidden;
+			width: fit-content;
+			margin-left: auto;
+			display: flex;
+			gap: 5px;
+			padding: 10px;
+			border-radius: 5px;
+			.icon{
+				cursor: pointer;
+				top: 2px;
+			}
+			&>p:nth-child(2){
+				font-size: 13px;
+				line-height: 15px;
+				margin-right: 5px;
+				word-break: break-word;
+				white-space: pre-wrap;
+				max-width: 300px;
+			}
+		}
+	}
 	.ModuleMenu{
 		grid-row: 4;
 		grid-column: 3;
@@ -242,6 +311,10 @@
 	}
 	.minitext{
 		font-size:12px;
+		color:#888c90;
+	}
+	.tinytext{
+		font-size:10px;
 		color:#888c90;
 	}
 	p{
@@ -295,7 +368,7 @@
 			display: flex;
 			align-items: center;
 			&.HeaderButtons>button{
-				transition: background-color 0.1s ease-in-out;
+				transition: background-color 0.1s ease-in-out, color 0.1s ease-in-out;
 				background-color: transparent;
 				color: #888c90;
 				width: 30px;
@@ -304,8 +377,12 @@
 				padding-top: 3px;
 				margin-right: 10px;
 				border-radius: 5px;
-				&:hover{
+				&:not(:last-child):hover{
 					background-color: #ffffff10;
+				}
+				&:last-child:hover{
+					background-color: #bb343430;
+					color: #ffffff60;
 				}
 			}
 		}

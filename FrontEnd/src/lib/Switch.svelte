@@ -2,6 +2,7 @@
     export let LayoutValue:{[key: string]: any}={};
     // export let Text:string;
     export let Attr:{[key: string]: string}={};
+    export let ModuleName:string = "";
 </script>
 <span>
     <label for="switch-{Attr.value}" class:disabled={LayoutValue[Attr.disable]} style="
@@ -9,7 +10,7 @@
     ">
         {LayoutValue[Attr.value]?"ON":"OFF"}
     </label>
-    <input id="switch-{Attr.value}" type="checkbox" checked={LayoutValue[Attr.value]} on:change={()=>window.GetValue(Attr.value,!LayoutValue[Attr.value])} disabled={LayoutValue[Attr.disable]} style="
+    <input id="switch-{Attr.value}" type="checkbox" checked={LayoutValue[Attr.value]} on:input={()=>window.GetValue(ModuleName, Attr.value,!LayoutValue[Attr.value])} disabled={LayoutValue[Attr.disable]} style="
         margin: {LayoutValue[Attr.margin] ?? '0'};
     " />
 </span>
@@ -18,6 +19,7 @@
         gap: 5px;
         display: flex;
 		flex-direction: row;
+        align-items: center;
     }
     label{
         user-select: none;

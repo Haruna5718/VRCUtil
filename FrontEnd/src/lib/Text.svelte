@@ -2,6 +2,7 @@
     export let LayoutValue:{[key: string]: any}={};
     export let Text:string;
     export let Attr:{[key: string]: string}={};
+    // export let ModuleName:string = "";
 
     function ConvertText(source):{Type: string, Text:String}[] {
 		const grouped = [];
@@ -22,6 +23,7 @@
 </span>
 <style lang="scss">
     span{
+        display: flex;
         align-self: center;
         white-space: pre-wrap;
         &.disabled{

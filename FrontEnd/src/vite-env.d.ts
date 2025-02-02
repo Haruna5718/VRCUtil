@@ -4,12 +4,12 @@ export {};
 
 declare global {
   interface Window {
-    pywebview?: {
-        api?: {
+    pywebview: {
+        api: {
           [key: string]: (...args: any[]) => any;
         };
       };
-      SetValue?:any;
-      GetValue?:any;
+      SetValue:any;
+      GetValue:any;
   }
 }

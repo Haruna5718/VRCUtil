@@ -9,7 +9,6 @@
     import Select from './lib/Select.svelte';
     import Space from './lib/Space.svelte';
     import Switch from './lib/Switch.svelte';
-    import Text from './lib/Text.svelte';
     import Vertical from './lib/Vertical.svelte';
 
 	let PageReady = false

@@ -15,17 +15,19 @@
 	let OnTop = false
 	let ModuleInfo = false
 
+	let NavReload = false
+
 	let LayoutData:{[key: string]:any} = {};
 	let WidgetData:{[key: string]:any} = {};
 	let LayoutValue:{[key: string]:any} = {};
 	let ModuleData:{[key: string]:any} = {};
-
+	let ReverseDatas:{[key: string]:any} = {}
 	let ModuleStatus:{[key: string]:number} = {}
+
 	let notices:[number, string][] = []
 
 	let hash = "";
 
-	let ReverseDatas = {}
 
 	const ValueRegex = /^\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}$/;
 	window.GetValue = (ModuleName:string, Name: string, Value:any=null) => {
@@ -37,6 +39,17 @@
 			if(!LayoutValue[ModuleName][Name]||Value!=null) window.pywebview.api.GetValue(ModuleName,match[1].replace("!",""),Value)
 		}
 		else LayoutValue[ModuleName][Name] = Name
+		if(Name=="{VRCUtil_Remove_This_Module}"){
+			delete ModuleData[ModuleName]
+			delete LayoutData[ModuleName]
+			delete WidgetData[ModuleName]
+			delete ModuleStatus[ModuleName]
+			delete LayoutValue[ModuleName]
+			delete ReverseDatas[ModuleName]
+			location.hash=""
+			NavReload = !NavReload
+			window.Notice(`Module "${ModuleName}" Removed`, 0)
+		}
 	}
 
 	window.SetValue = (ModuleName: string, Name: string, Value:any=null) => {
@@ -97,20 +110,24 @@
 	</header>
 	<NavMenu Icon="" onclick={()=>NavOpen=!NavOpen} style="grid-row: 2; grid-column: 1;"/>
 	<nav>
-		<NavMenu Icon="" Text="DashBoard" Select={hash==""} onclick={()=>location.hash=""}/>
-		{#each Object.entries(ModuleData) as val}
-			<NavMenu Icon={val[1].DisplayIcon} Text={val[1].DisplayName} Select={hash==val[0]} onclick={()=>location.hash=val[0]} Status={ModuleStatus[val[0]]} />
-		{/each}
+		<NavMenu Icon="" Text="DashBoard" Select={!(ModuleData[hash]??(hash=="Settings"))} onclick={()=>location.hash=""}/>
+		{#key NavReload}
+			{#each Object.entries(ModuleData) as val}
+				<NavMenu Icon={val[1].DisplayIcon} Text={val[1].DisplayName} Select={hash==val[0]} onclick={()=>location.hash=val[0]} Status={ModuleStatus[val[0]]} />
+			{/each}
+		{/key}
 	</nav>
 	<NavMenu Icon="" Text="Settings" Select={hash=="Settings"} onclick={()=>location.hash="Settings"} style="grid-row: 4; grid-column: 1 / 3;"/>
 	{#key hash}
 		<div class="container" on:load={(e)=>e.currentTarget.scrollTo(0,0)}>
 			{#if PageReady}
-				<div class="Title">{hash==""?"Dashboard":(ModuleData[hash]?.DisplayName??hash)}</div>
-				<div class="page">
-					{#if ModuleData[hash]}
+				<div class="Title">{ModuleData[hash]?.DisplayName??(hash=="Settings"?hash:"Dashboard")}</div>
+				{#if ModuleData[hash]}
+					<div class="page">
 						<Component LayoutValue={LayoutValue[hash]} LayoutData={LayoutData[hash]} ModuleName={hash}/>
-					{:else if hash=="Settings"}
+					</div>
+				{:else if hash=="Settings"}
+					<div class="page">
 						<Vertical>
 							<Box>
 								<Horizontal>
@@ -186,14 +203,20 @@
 								</Horizontal>
 							</Box>
 						</Vertical>
+					</div>
+				{:else}
+					{#if Object.keys(WidgetData).length==0}
+						<p class="WaitInit">There’s nothing here… at least not yet.</p>
 					{:else}
-						<Vertical>
-							{#each Object.keys(WidgetData) as ModuleName}
-								<Component LayoutValue={LayoutValue[ModuleName]} LayoutData={WidgetData[ModuleName]} {ModuleName}/>
-							{/each}
-						</Vertical>
+						<div class="page">
+							<Vertical>
+								{#each Object.keys(WidgetData) as ModuleName}
+									<Component LayoutValue={LayoutValue[ModuleName]} LayoutData={WidgetData[ModuleName]} {ModuleName}/>
+								{/each}
+							</Vertical>
+						</div>
 					{/if}
-				</div>
+				{/if}
 			{:else}
 				<p class="WaitInit">Starting...</p>
 			{/if}
@@ -222,7 +245,7 @@
 					<Line />
 					<p>{ModuleData[hash]?.Description}</p>
 					<Space />
-					<Button Attr={{value:"Remove", background:"background"}} Text="Remove" LayoutValue={{background:"#bb3434"}}/>
+					<Button Attr={{value:"{VRCUtil_Remove_This_Module}", background:"background"}} Text="Remove" LayoutValue={{background:"#bb3434"}} ModuleName={hash}/>
 				</div>
 			</div>
 		{/key}
@@ -345,7 +368,9 @@
 		}
 	}
 	.WaitInit{
-		height: 100%;
+		position: absolute;
+		inset: 0;
+		text-align: center;
 		color: #888c90;
 		display: grid;
 		align-items: center;

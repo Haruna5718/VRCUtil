@@ -42,10 +42,14 @@ import requests
 import traceback
 import subprocess
 import mimetypes
+import shutil
 from pythonosc import dispatcher, osc_server, udp_client
-from dataclasses import dataclass, field, asdict, is_dataclass, replace
+from dataclasses import asdict
+import gc
 
 def CheckUpdate():
+	if isDebug:
+		return
 	with open(APPROOT_PATH/"Setting.json", "r", encoding="utf-8") as f:
 		if not json.load(f)["AutoUpdate"]:
 			return
@@ -61,7 +65,6 @@ def CheckUpdate():
 			f.write(chunk)
 	subprocess.Popen([UPDATE_PATH/FileName])
 	
-
 class VRInfoAPI:
 	def __init__(self):		
 		with open(APPROOT_PATH/"Setting.json", "r", encoding="utf-8") as f:
@@ -69,8 +72,6 @@ class VRInfoAPI:
 		self.Modules: dict[str, ModuleLoader.ModuleDataType] = {}
 		self.OSCServer = osc_server.ThreadingOSCUDPServer((self.SettingData["OSCHost"], int(self.SettingData["OSCOut"])), dispatcher.Dispatcher(), bind_and_activate=False)
 		self.OSCSender = udp_client.SimpleUDPClient(self.SettingData["OSCHost"], int(self.SettingData["OSCIn"]))
-		
-		self.OSCServer.isactive = False
 
 	def SaveSetting(self):
 		with open(APPROOT_PATH/"Setting.json", "w", encoding="utf-8") as f:
@@ -78,11 +79,6 @@ class VRInfoAPI:
 
 	def UpdateData(self, Name, ValueName, Value):
 		window.evaluate_js(f'window.SetValue("{Name}", "{ValueName}", {json.dumps(Value)})')
-
-	def CloseApp(self):
-		self.OSCServer.shutdown()
-		self.OSCServer.server_close()
-		CheckUpdate()
 
 	def ontop(self, State:bool):
 		threading.Thread(target=lambda s: setattr(window, "on_top", s), args=(State,), daemon=True).start()
@@ -139,10 +135,9 @@ class VRInfoAPI:
 
 	def InitOSCServer(self):
 		try:
-			if self.OSCServer.isactive:
+			if getattr(self.OSCServer,"isactive",False):
 				self.OSCServer.shutdown()
 				self.OSCServer.server_close()
-
 			self.OSCServer.server_address = (self.SettingData["OSCHost"], int(self.SettingData["OSCOut"]))
 			self.OSCServer.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 			self.OSCServer.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -173,6 +168,14 @@ class VRInfoAPI:
 					for name in self.Modules.keys():
 						self._ExecTryModule(name, "onPortChange", BeforePort, (self.OSCSender._port, self.OSCServer.server_address[1]))
 			return self.UpdateData("Settings", ValueName, self.SettingData[ValueName])
+		elif ValueName=="VRCUtil_Remove_This_Module":
+			if isDebug:
+				return
+			del self.Modules[ModuleName]
+			gc.collect()
+			def deleteFile(*_):
+				shutil.rmtree(MODULES_PATH/ModuleName, onerror=deleteFile)
+			threading.Thread(target=deleteFile, daemon=True).start()
 		else:
 			Paths = ValueName.split(".")
 			if Data := getattr(self.Modules[ModuleName].Function, "Data", None):
@@ -224,9 +227,9 @@ class VRInfoAPI:
 api = VRInfoAPI()
 window = webview.create_window("VRCUtil", ("http://localhost:3000/" if isDebug else APPROOT_PATH/"FrontEnd"/"index.html"), js_api=api, background_color="#202020", resizable=False, frameless=True, easy_drag=False, draggable=True, text_select=isDebug, width=900, height=600)
 
-mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("application/javascript", ".js") # for MIME Error Fix
 
-window.events.closed += api.CloseApp
+window.events.closed += CheckUpdate
 api.destroy = window.destroy
 api.minimize = window.minimize
 

@@ -137,5 +137,7 @@ __pycache__/
 
 Modules/
 Download/
+build/
+dist/
 
 *.lock

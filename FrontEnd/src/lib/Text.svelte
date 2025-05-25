@@ -1,8 +1,8 @@
 <script lang="ts">
     export let LayoutValue:{[key: string]: any}={};
-    export let Text:string;
+    export let Text:string = "";
     export let Attr:{[key: string]: string}={};
-    // export let ModuleName:string = "";
+    export let ModuleName:string = "";
 
     function ConvertText(source):{Type: string, Text:String}[] {
 		const grouped = [];
@@ -21,6 +21,7 @@
         <p style="top: {data.Type=='Icon'?2.5:0}px;">{data.Text}</p>
     {/each}
 </span>
+<slot />
 <style lang="scss">
     span{
         display: flex;

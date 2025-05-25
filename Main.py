@@ -12,16 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
-sys.dont_write_bytecode = True
+from __future__ import annotations
 
-import os
 import msvcrt
-from pathlib import Path
 
-isDebug = not getattr(sys, 'frozen', False)
-
-APPROOT_PATH = Path(__file__).parent.resolve() if isDebug else Path(os.getenv('LOCALAPPDATA'))/'Haruna5718'/'VRCUtil'
+from Metadata import *
 
 try:
 	f = open(APPROOT_PATH/'VRCUtil.lock', "w")
@@ -29,12 +24,7 @@ try:
 except OSError:
     exit(0)
 
-MODULES_PATH = APPROOT_PATH/'Modules'
-
-VERSION = "2.0.0"
-
 import socket
-import ModuleLoader
 import json
 import webview
 import threading
@@ -43,42 +33,124 @@ import traceback
 import subprocess
 import mimetypes
 import shutil
+import time
 from pythonosc import dispatcher, osc_server, udp_client
-from dataclasses import asdict
+from typing import *
+from dataclasses import dataclass
 import gc
+import importlib.util
+import xml.etree.ElementTree
+import tempfile
+import atexit
+
+@dataclass
+class ModuleDataType:
+	DisplayName: str
+	DisplayIcon: str
+	Version: str
+	Author: str
+	Description: str
+	Url: list[dict[str,str]]
+	ModulePath: str
+	Layout: Any
+	Widget: Any
+	Function: Any
+
+def deleteFile(Path):
+	time.sleep(1)
+	shutil.rmtree(Path, onerror=deleteFile)
+
+def XamlToJson(Element: xml.etree.ElementTree.Element):
+	if Element.tag not in VAILD_DATAS:
+		raise Exception(f"Unknown Tag: {Element.tag}")
+	
+	Text = Element.text.strip() if Element.text else ""
+	if Text and not VAILD_DATAS[Element.tag]['Text']:
+		raise Exception(f"Text Not Allowed: {Element.tag}")
+	
+	Childs = list(Element)
+	if Childs and not VAILD_DATAS[Element.tag]["Child"]:
+		raise Exception(f"Children Not Allowed: {Element.tag}")
+	
+	if WrongAttr:=set(Element.attrib.keys())-set(VAILD_DATAS[Element.tag]['Attr']):
+		raise Exception(f"Unknown Attr in {Element.tag}: {', '.join(WrongAttr)}")
+	
+	return {
+		"Type":Element.tag,
+		"Attr":Element.attrib,
+		"Text":Text,
+		"Children":[XamlToJson(Child) for Child in Childs]
+	}
+
+def LoadXaml(FilePath: Path, FileName: str):
+	try:
+		return XamlToJson(xml.etree.ElementTree.parse(FilePath / FileName).getroot())
+	except FileNotFoundError as e:
+		return None
 
 def CheckUpdate():
-	if isDebug:
-		return
 	with open(APPROOT_PATH/"Setting.json", "r", encoding="utf-8") as f:
 		if not json.load(f)["AutoUpdate"]:
 			return
-	response = requests.get("https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest")
+	response = requests.get(REPO_URL)
 	if response.json()["tag_name"] == VERSION:
 		return
-	UPDATE_PATH = APPROOT_PATH/"Download"
-	os.makedirs(UPDATE_PATH, exist_ok=True)
+	os.makedirs(UPDATE_PATH:=APPROOT_PATH/"Download", exist_ok=True)
 	FileName = response.json()["assets"][0]["name"]
 	Fileresponse = requests.get(response.json()["assets"][0]["browser_download_url"], stream=True)
 	with open(UPDATE_PATH/FileName, "wb") as f:
 		for chunk in Fileresponse.iter_content(chunk_size=8192):
 			f.write(chunk)
 	subprocess.Popen([UPDATE_PATH/FileName])
-	
+
+def UpdateData(Name, ValueName, Value):
+	window.evaluate_js(f'window.SetValue("{Name}", "{ValueName}", {json.dumps(Value)})')
+
+def SaveSetting():
+	with open(APPROOT_PATH/"Setting.json", "w", encoding="utf-8") as f:
+		json.dump(SettingData, f, ensure_ascii=False, indent="\t")
+
+def ExecModule(name:str, funcName:str, *args):
+	def Function():
+		try:
+			getattr(Modules[name].Function, funcName)(*args)
+		except Exception as e:
+			ErrorMessage = json.dumps(f"Error raised in {name}\n{e}")
+			window.evaluate_js(f'window.Notice({ErrorMessage},3)')
+			print(f"{''.join(traceback.format_tb(e.__traceback__))}\n{type(e).__name__}: {e}")
+	threading.Thread(target=Function, daemon=True).start()
+
+def ExecTryModule(name:str, funcName:str, *args):
+	def Function():
+		try:
+			getattr(Modules[name].Function, funcName)(*args)
+		except:
+			pass
+	threading.Thread(target=Function, daemon=True).start()
+
+def InitOSCServer():
+	try:
+		if getattr(OSCServer,"isactive",False):
+			OSCServer.shutdown()
+			OSCServer.server_close()
+		OSCServer.server_address = (SettingData["OSCHost"], int(SettingData["OSCOut"]))
+		OSCServer.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		OSCServer.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		OSCServer.server_bind()
+		threading.Thread(target=OSCServer.serve_forever, daemon=True).start()
+		OSCServer.isactive = True
+	except Exception as e:
+		OSCServer.isactive = False
+		window.evaluate_js(f'window.Notice("{e}",3)')
+
+Modules: dict[str, ModuleDataType] = {}
 class VRInfoAPI:
-	def __init__(self):		
+	def __init__(self):
+		global SettingData, OSCServer, OSCSender
 		with open(APPROOT_PATH/"Setting.json", "r", encoding="utf-8") as f:
-			self.SettingData = json.load(f)
-		self.Modules: dict[str, ModuleLoader.ModuleDataType] = {}
-		self.OSCServer = osc_server.ThreadingOSCUDPServer((self.SettingData["OSCHost"], int(self.SettingData["OSCOut"])), dispatcher.Dispatcher(), bind_and_activate=False)
-		self.OSCSender = udp_client.SimpleUDPClient(self.SettingData["OSCHost"], int(self.SettingData["OSCIn"]))
-
-	def SaveSetting(self):
-		with open(APPROOT_PATH/"Setting.json", "w", encoding="utf-8") as f:
-			json.dump(self.SettingData, f, ensure_ascii=False, indent="\t")
-
-	def UpdateData(self, Name, ValueName, Value):
-		window.evaluate_js(f'window.SetValue("{Name}", "{ValueName}", {json.dumps(Value)})')
+			SettingData = json.load(f)
+		OSCServer = osc_server.ThreadingOSCUDPServer((SettingData["OSCHost"], int(SettingData["OSCOut"])), dispatcher.Dispatcher(), bind_and_activate=False)
+		OSCSender = udp_client.SimpleUDPClient(SettingData["OSCHost"], int(SettingData["OSCIn"]))
 
 	def ontop(self, State:bool):
 		threading.Thread(target=lambda s: setattr(window, "on_top", s), args=(State,), daemon=True).start()
@@ -90,13 +162,58 @@ class VRInfoAPI:
 			if ModuleFolder.startswith("_"):
 				continue
 			try:
-				self.Modules[ModuleFolder] = ModuleLoader.LoadModule(MODULES_PATH/ModuleFolder, window, self.OSCServer, self.OSCSender)
+				if not (MODULES_PATH/ModuleFolder/"ModuleInfo.json").exists():
+					raise Exception("Missing File: ModuleInfo.json")
+				
+				if not (MODULES_PATH/ModuleFolder/"Layout.xaml").exists():
+					raise Exception("Missing File: Layout.xaml")
+				
+				if not (MODULES_PATH/ModuleFolder/"Function.pyd").exists():
+					if not (MODULES_PATH/ModuleFolder/"Function.py").exists():
+						raise Exception("Missing File: Function.py")
+					else:
+						FunctionName = "Function.py"
+				else:
+					FunctionName = "Function.pyd"
+				
+				if isDebug:
+					TempFolder = MODULES_PATH/ModuleFolder
+				else:
+					TempFolder = Path(tempfile.mkdtemp(prefix="VRCUtil_"))
+					atexit.register(deleteFile, TempFolder)
+					sys.path.insert(0, str(TempFolder))
+
+					if (MODULES_PATH/ModuleFolder/"Python").exists():
+						shutil.copytree(MODULES_PATH/ModuleFolder/"Python", TempFolder, dirs_exist_ok=True)
+					shutil.copy(MODULES_PATH/ModuleFolder/FunctionName, TempFolder/FunctionName)
+
+				try:
+					Spec = importlib.util.spec_from_file_location("Function", TempFolder/FunctionName)
+					Module = importlib.util.module_from_spec(Spec)
+					Module.__file__ = str(MODULES_PATH/ModuleFolder/FunctionName)
+					Spec.loader.exec_module(Module)
+				except ImportError as e:
+					raise Exception(f"Module Raise ImportError: {e}")
+
+				MainClass = getattr(Module, "MainClass")()
+				MainClass.window = window
+				MainClass.OSCServer = OSCServer
+				MainClass.OSCSender = OSCSender
+
+				with open(MODULES_PATH/ModuleFolder/"ModuleInfo.json", "r", encoding="UTF-8") as file:
+					Modules[ModuleFolder] = ModuleDataType(
+						**json.load(file),
+						ModulePath=str(MODULES_PATH/ModuleFolder),
+						Layout=LoadXaml(MODULES_PATH/ModuleFolder, "Layout.xaml"),
+						Widget=LoadXaml(MODULES_PATH/ModuleFolder, "Widget.xaml"),
+						Function=MainClass
+					)
 			except Exception as e:
 				ErrorMessage = json.dumps(f"Load Failed {ModuleFolder}\n{e}")
 				window.evaluate_js(f'window.Notice({ErrorMessage}, 3)')
 		return {
-			"LayoutData": {k: asdict(v.Layout) for k, v in self.Modules.items()},
-			"WidgetData": {k: asdict(v.Widget) for k, v in self.Modules.items() if v.Widget},
+			"LayoutData": {k: v.Layout for k, v in Modules.items()},
+			"WidgetData": {k: v.Widget for k, v in Modules.items() if v.Widget},
 			"ModuleData": {
 				k: {
 					"DisplayName": Module.DisplayName,
@@ -106,82 +223,46 @@ class VRInfoAPI:
 					"Description": Module.Description,
 					"Url": Module.Url
 				}
-				for k, Module in self.Modules.items()
+				for k, Module in Modules.items()
 			}
 		}
-	
-	def _ExecModule(self, name:str, funcName:str, *args):
-		def Function():
-			try:
-				getattr(self.Modules[name].Function, funcName)(*args)
-			except Exception as e:
-				ErrorMessage = json.dumps(f"Error raised in {name}\n{e}")
-				window.evaluate_js(f'window.Notice({ErrorMessage},3)')
-				print(f"{''.join(traceback.format_tb(e.__traceback__))}\n{type(e).__name__}: {e}")
-		threading.Thread(target=Function, daemon=True).start()
-
-	def _ExecTryModule(self, name:str, funcName:str, *args):
-		def Function():
-			try:
-				getattr(self.Modules[name].Function, funcName)(*args)
-			except:
-				pass
-		threading.Thread(target=Function, daemon=True).start()
 
 	def InitModule(self):
-		self.InitOSCServer()
-		for name in self.Modules.keys():
-			self._ExecModule(name, "init")
-
-	def InitOSCServer(self):
-		try:
-			if getattr(self.OSCServer,"isactive",False):
-				self.OSCServer.shutdown()
-				self.OSCServer.server_close()
-			self.OSCServer.server_address = (self.SettingData["OSCHost"], int(self.SettingData["OSCOut"]))
-			self.OSCServer.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-			self.OSCServer.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-			self.OSCServer.server_bind()
-			threading.Thread(target=self.OSCServer.serve_forever, daemon=True).start()
-			self.OSCServer.isactive = True
-		except Exception as e:
-			self.OSCServer.isactive = False
-			window.evaluate_js(f'window.Notice("{e}",3)')
+		InitOSCServer()
+		for name in Modules.keys():
+			ExecModule(name, "init")
 		
 	def GetValue(self, ModuleName:str, ValueName:str, Value=None):
 		if ModuleName == "Settings":
 			if ValueName == "version":
-				return self.UpdateData("Settings", ValueName, VERSION)
+				return UpdateData("Settings", ValueName, VERSION)
 			if ValueName == "newversion":
-				return self.UpdateData("Settings", ValueName, VERSION if isDebug else requests.get("https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest").json()["tag_name"])
+				return UpdateData("Settings", ValueName, VERSION if isDebug else requests.get(REPO_URL).json()["tag_name"])
 			if Value != None:
-				self.SettingData[ValueName] = Value
-				self.SaveSetting()
+				SettingData[ValueName] = Value
+				SaveSetting()
 				if isPortChanged:=(ValueName in ["OSCIn", "OSCOut"]):
-					BeforePort = (self.OSCSender._port, self.OSCServer.server_address[1])
+					BeforePort = (OSCSender._port, OSCServer.server_address[1])
 				if ValueName in ["OSCHost", "OSCOut"]:
-					self.InitOSCServer()
+					InitOSCServer()
 				if ValueName in ["OSCHost", "OSCIn"]:
-					self.OSCSender._address = self.SettingData["OSCHost"]
-					self.OSCSender._port = int(self.SettingData["OSCIn"])
+					OSCSender._address = SettingData["OSCHost"]
+					OSCSender._port = int(SettingData["OSCIn"])
 				if isPortChanged:
-					for name in self.Modules.keys():
-						self._ExecTryModule(name, "onPortChange", BeforePort, (self.OSCSender._port, self.OSCServer.server_address[1]))
-			return self.UpdateData("Settings", ValueName, self.SettingData[ValueName])
+					for name in Modules.keys():
+						ExecTryModule(name, "onPortChange", BeforePort, (OSCSender._port, OSCServer.server_address[1]))
+			return UpdateData("Settings", ValueName, SettingData[ValueName])
 		elif ValueName=="VRCUtil_Remove_This_Module":
-			if isDebug:
-				return
-			del self.Modules[ModuleName]
+			del Modules[ModuleName]
 			gc.collect()
-			def deleteFile(*_):
-				shutil.rmtree(MODULES_PATH/ModuleName, onerror=deleteFile)
-			threading.Thread(target=deleteFile, daemon=True).start()
+			if not isDebug:
+				threading.Thread(target=deleteFile, args=(MODULES_PATH/ModuleName,)).start()
 		else:
 			Paths = ValueName.split(".")
-			if Data := getattr(self.Modules[ModuleName].Function, "Data", None):
+			if Data := getattr(Modules[ModuleName].Function, "Data", None):
 				for key in Paths[:-1]:
 					if isinstance(Data, list):
-						if not key.isdigit():
+						if key.isdigit():
 							break
 						key = int(key)
 						if len(Data) <= key:
@@ -193,12 +274,12 @@ class VRInfoAPI:
 					if (isinstance(Data, dict) and (lastKey := Paths[-1]) in Data) or (isinstance(Data, list) and len(Data) > (lastKey := int(Paths[-1]))):
 						if Value is not None:
 							Data[lastKey] = Value
-			if getattr(self.Modules[ModuleName].Function, Paths[0], None):
-				self._ExecModule(ModuleName, Paths[0], Value, *Paths[1:])
-			if getattr(self.Modules[ModuleName].Function, "SaveData", None):
-				self._ExecModule(ModuleName, "SaveData")
+			if getattr(Modules[ModuleName].Function, Paths[0], None):
+				ExecModule(ModuleName, Paths[0], Value, *Paths[1:])
+			if getattr(Modules[ModuleName].Function, "SaveData", None):
+				ExecModule(ModuleName, "SaveData")
 			try:
-				self.UpdateData(ModuleName, ValueName, Data[lastKey])
+				UpdateData(ModuleName, ValueName, Data[lastKey])
 			except:
 				pass
 
@@ -207,7 +288,7 @@ class VRInfoAPI:
 			raise Exception("SteamVR is not installed")
 		
 		with open(OpenVRPaths, "r") as file:
-			SteamVRPath = [i for i in json.load(file)["config"]if "Steam" in i][0]
+			SteamVRPath = Path([i for i in json.load(file)["config"]if "Steam" in i][0])
 
 		vrmanifestPath = APPROOT_PATH/'manifest.vrmanifest'
 		SteamVRConfig = SteamVRPath/"appconfig.json"
@@ -225,11 +306,13 @@ class VRInfoAPI:
 		return State
 
 api = VRInfoAPI()
-window = webview.create_window("VRCUtil", ("http://localhost:3000/" if isDebug else APPROOT_PATH/"FrontEnd"/"index.html"), js_api=api, background_color="#202020", resizable=False, frameless=True, easy_drag=False, draggable=True, text_select=isDebug, width=900, height=600)
+window = webview.create_window("VRCUtil", str("http://localhost:3000/" if isDebug else APPROOT_PATH/"FrontEnd"/"index.html"), js_api=api, background_color="#202020", frameless=True, easy_drag=False, draggable=True, text_select=isDebug, width=900, height=600)
 
-mimetypes.add_type("application/javascript", ".js") # for MIME Error Fix
+mimetypes.add_type("application/javascript", ".js")
 
-window.events.closed += CheckUpdate
+if not isDebug:
+	window.events.closed += CheckUpdate
+
 api.destroy = window.destroy
 api.minimize = window.minimize
 

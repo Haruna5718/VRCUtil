@@ -1,6 +1,6 @@
 <script lang="ts">
     export let LayoutValue:{[key: string]: any}={};
-    // export let Text:string;
+    export let Text:string = "";
     export let Attr:{[key: string]: string}={};
     export let ModuleName:string = "";
 </script>
@@ -14,6 +14,7 @@
         margin: {LayoutValue[Attr.margin] ?? '0'};
     " />
 </span>
+<slot />
 <style lang="scss">
     span{
         gap: 5px;

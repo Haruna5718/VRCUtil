@@ -72,6 +72,8 @@ if __name__ == "__main__":
         os.remove(function_py_path.replace(".py", ".c"))
         shutil.copytree(f"Modules/{Module}", f"build/{Module}", dirs_exist_ok=True)
         os.remove(f"build/{Module}/Function.py")
+        os.remove(f"build/{Module}/Setting.json")
+        os.rename(f"build/{Module}/Setting.Build.json", f"build/{Module}/Setting.json")
         os.rename("Function.cp311-win_amd64.pyd", f"build/{Module}/Function.pyd")
 
         func_imports = extract_imports_from(function_py_path)

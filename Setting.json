@@ -1,5 +1,5 @@
 {
-	"AutoStart": true,
+	"AutoStart": false,
 	"AutoUpdate": false,
 	"OSCHost": "127.0.0.1",
 	"OSCIn": "9000",

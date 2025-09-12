@@ -2,6 +2,12 @@ cd "C:\Users\haruna5718\OneDrive\file\code\Project\VRCUtil"
 
 rmdir /s /q "build"
 rmdir /s /q "dist"
+rmdir /s /q "FrontEnd/dist"
+
+cd FrontEnd
+call npm run build
+cd ..
+
 rmdir /s /q "FrontEnd/dist/.git"
 
 pyinstaller "VRCUtil.spec"
@@ -17,6 +23,8 @@ pyinstaller "HeartRate2OSC-Installer.spec"
 pyinstaller "OSC2Discord-Installer.spec"
 pyinstaller "OSCRouter-Installer.spec"
 pyinstaller "VRBattery2OSC-Installer.spec"
+
+rmdir /s /q "build"
 
 @REM pyinstaller -w --noupx -n "VRCUtil" --icon="FrontEnd/dist/favicon.ico" --add-data="C:\Users\haruna5718\AppData\Local\Programs\Python\Python311\Lib\site-packages\openvr\libopenvr_api_32.dll;openvr" --add-data="C:\Users\haruna5718\AppData\Local\Programs\Python\Python311\Lib\site-packages\openvr\libopenvr_api_64.dll;openvr" Main.py
 @REM pyinstaller -w --noupx -F -n "Uninstaller" --distpath "C:\Users\haruna5718\OneDrive\file\code\Project\VRCUtil\dist\VRCUtil" --icon="FrontEnd/dist/favicon.ico" VRCUtilUninstaller.py

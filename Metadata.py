@@ -20,7 +20,7 @@ isDebug = not getattr(sys, 'frozen', False)
 APPROOT_PATH = Path(__file__).parent.resolve() if isDebug else Path(os.getenv('LOCALAPPDATA'))/'Haruna5718'/'VRCUtil'
 MODULES_PATH = APPROOT_PATH/'Modules'
 
-VERSION = "2.0.0"
+VERSION = "2.1.1"
 
 REPO_URL = "https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest"
 
@@ -48,7 +48,7 @@ VAILD_DATAS={
 	"Text":{ # type 스타일을 가지는 텍스트입니다. value값과 동기화 할 수 있습니다.
 		"Text":True,
 		"Child":False,
-		"Attr":["type","color","size","margin","disable"]
+		"Attr":["type","color","size","margin","disable", "url"]
 	},
 	"Line":{ # 라인입니다. 정렬 방향의 영향을 받습니다.
 		"Text":False,

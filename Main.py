@@ -14,15 +14,18 @@
 
 from __future__ import annotations
 
+import sys
+sys.dont_write_bytecode = True
+
 import msvcrt
 
 from Metadata import *
 
 try:
-	f = open(APPROOT_PATH/'VRCUtil.lock', "w")
-	msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+	LockFile = open(APPROOT_PATH/'VRCUtil.lock', "w")
+	msvcrt.locking(LockFile.fileno(), msvcrt.LK_NBLCK, 1)
 except OSError:
-    exit(0)
+	sys.exit(1)
 
 import socket
 import json
@@ -89,9 +92,6 @@ def LoadXaml(FilePath: Path, FileName: str):
 		return None
 
 def CheckUpdate():
-	with open(APPROOT_PATH/"Setting.json", "r", encoding="utf-8") as f:
-		if not json.load(f)["AutoUpdate"]:
-			return
 	response = requests.get(REPO_URL)
 	if response.json()["tag_name"] == VERSION:
 		return
@@ -101,7 +101,15 @@ def CheckUpdate():
 	with open(UPDATE_PATH/FileName, "wb") as f:
 		for chunk in Fileresponse.iter_content(chunk_size=8192):
 			f.write(chunk)
+	time.sleep(0.5)  # Give some time for the file to be written completely
 	subprocess.Popen([UPDATE_PATH/FileName])
+
+def PostExit():
+	msvcrt.locking(LockFile.fileno(), msvcrt.LK_UNLCK, 1)
+	with open(APPROOT_PATH/"Setting.json", "r", encoding="utf-8") as f:
+		if json.load(f)["AutoUpdate"]:
+			CheckUpdate()
+	sys.exit()
 
 def UpdateData(Name, ValueName, Value):
 	window.evaluate_js(f'window.SetValue("{Name}", "{ValueName}", {json.dumps(Value)})')
@@ -239,6 +247,8 @@ class VRInfoAPI:
 			if ValueName == "newversion":
 				return UpdateData("Settings", ValueName, VERSION if isDebug else requests.get(REPO_URL).json()["tag_name"])
 			if Value != None:
+				if ValueName == "AutoStart":
+					return UpdateData("Settings", ValueName, self.SetAutoStart(Value))
 				SettingData[ValueName] = Value
 				SaveSetting()
 				if isPortChanged:=(ValueName in ["OSCIn", "OSCOut"]):
@@ -262,7 +272,7 @@ class VRInfoAPI:
 			if Data := getattr(Modules[ModuleName].Function, "Data", None):
 				for key in Paths[:-1]:
 					if isinstance(Data, list):
-						if key.isdigit():
+						if not key.isdigit():
 							break
 						key = int(key)
 						if len(Data) <= key:
@@ -285,7 +295,7 @@ class VRInfoAPI:
 
 	def SetAutoStart(self, State: bool):
 		if not os.path.exists(OpenVRPaths:=Path(os.getenv('LOCALAPPDATA'))/"openvr"/"openvrpaths.vrpath"):
-			raise Exception("SteamVR is not installed")
+			return window.evaluate_js(f'window.Notice("SteamVR is not installed", 3)')
 		
 		with open(OpenVRPaths, "r") as file:
 			SteamVRPath = Path([i for i in json.load(file)["config"]if "Steam" in i][0])
@@ -298,10 +308,11 @@ class VRInfoAPI:
 
 		with open(SteamVRConfig, "r") as file:
 			data = json.load(file)
-			if vrmanifestPath not in data["manifest_paths"]:
-				data["manifest_paths"].append(vrmanifestPath)
-				with open(SteamVRConfig, "w") as file2:
-					json.dump(data, file2, indent=4)
+
+		if str(vrmanifestPath) not in data["manifest_paths"]:
+			data["manifest_paths"].append(str(vrmanifestPath))
+			with open(SteamVRConfig, "w") as file:
+				json.dump(data, file, indent=4)
 
 		return State
 
@@ -311,7 +322,7 @@ window = webview.create_window("VRCUtil", str("http://localhost:3000/" if isDebu
 mimetypes.add_type("application/javascript", ".js")
 
 if not isDebug:
-	window.events.closed += CheckUpdate
+	window.events.closed += PostExit
 
 api.destroy = window.destroy
 api.minimize = window.minimize

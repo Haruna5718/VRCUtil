@@ -316,7 +316,7 @@
 			position: absolute;
 			right: -1px;
 			box-shadow: inherit;
-			transform: translateY(-100%);
+			transform: translateY(calc(-100% + 18px));
 		}
 		.content{
 			background-color: inherit;

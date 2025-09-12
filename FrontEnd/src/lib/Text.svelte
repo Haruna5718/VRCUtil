@@ -16,19 +16,36 @@
 		return grouped;
 	}
 </script>
-<span class:disabled={LayoutValue[Attr.disable]} style="color: {LayoutValue[Attr.color] ?? '#fff'}; font-size: {LayoutValue[Attr.size] ?? '16px'}; margin: {LayoutValue[Attr.margin] ?? '0'};">
-    {#each ConvertText(Text) as data}
-        <p style="top: {data.Type=='Icon'?2.5:0}px;">{data.Text}</p>
-    {/each}
-</span>
+{#if LayoutValue[Attr.url]}
+    <a target="_blank" href={LayoutValue[Attr.url]} class:disabled={LayoutValue[Attr.disable]} style="
+        color: {LayoutValue[Attr.color] ?? '#0080ff'};
+        font-size: {LayoutValue[Attr.size] ?? '16px'};
+        margin: {LayoutValue[Attr.margin] ?? '0'};
+    ">
+            {#each ConvertText(Text) as data}
+                <p style="top: {data.Type=='Icon'?2.5:0}px;">{data.Text}</p>
+            {/each}
+    </a>
+{:else}
+    <span class:disabled={LayoutValue[Attr.disable]} style="
+        color: {LayoutValue[Attr.color] ?? '#fff'};
+        font-size: {LayoutValue[Attr.size] ?? '16px'};
+        margin: {LayoutValue[Attr.margin] ?? '0'};
+    ">
+        {#each ConvertText(Text) as data}
+            <p style="top: {data.Type=='Icon'?2.5:0}px;">{data.Text}</p>
+        {/each}
+    </span>
+{/if}
 <slot />
 <style lang="scss">
-    span{
+    a,span{
         display: flex;
         align-self: center;
         white-space: pre-wrap;
         &.disabled{
             filter: brightness(70%);
         }
+        text-decoration: none;
     }
 </style>

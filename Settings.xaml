@@ -1,0 +1,69 @@
+<Page path="settings" icon="" name="Settings" title="Settings">
+    <Box>
+        <Horizontal>
+            <Text> App theme</Text>
+            <Space />
+            <Select value="system.theme">
+                <Option value="dark"> Dark</Option>
+                <Option value="light"> Light</Option>
+                <Option value="system"> Use system setting</Option>
+            </Select>
+        </Horizontal>
+    </Box>
+    <Box>
+        <Horizontal>
+            <Text> Auto start</Text>
+            <Space />
+            <Vertical>
+                <Select value="settings.autoStart">
+                    <Option value="0"> Disable Auto start</Option>
+                    <Option value="1"> Start with SteamVR</Option>
+                    <Option value="2"> Start with VRChat</Option>
+                    <Option value="3"> Start with System</Option>
+                </Select>
+                <!-- <Check value="settings.startMinimized">Start minimized</Check> -->
+            </Vertical>
+        </Horizontal>
+    </Box>
+    <Box>
+        <Horizontal>
+            <Text> Check update</Text>
+            <Space />
+            <Vertical gap="0" align="right">
+                <Text type="description">Current:</Text>
+                <Text type="description">Latest:</Text>
+            </Vertical>
+            <Vertical gap="0" align="left">
+                <Text type="description">{system.version}</Text>
+                <Text type="description">{system.latest}</Text>
+            </Vertical>
+            <Switch value="settings.checkUpdate"/>
+        </Horizontal>
+    </Box>
+    <Box>
+        <Horizontal>
+            <Text> OSC config</Text>
+            <Space />
+            <Vertical gap="0" align="left">
+                <Text type="description">Address</Text>
+                <Input value="settings.osc.address" width="115px">Address</Input>
+            </Vertical>
+            <Vertical gap="0" align="left">
+                <Text type="description">Send</Text>
+                <Input value="settings.osc.send" width="115px" type="number" min="0" max="65535">Port</Input>
+            </Vertical>
+            <Vertical gap="0" align="left">
+                <Text type="description">Receive</Text>
+                <Input value="settings.osc.receive" width="115px" type="number" min="0" max="65535">Port</Input>
+            </Vertical>
+        </Horizontal>
+    </Box>
+    <Box>
+        <Horizontal>
+            <Text> Debug log</Text>
+            <Space />
+            <Button type="link" value="vrcutil.openLog">Open log</Button>
+            <Switch value="settings.debugLog"/>
+        </Horizontal>
+    </Box>
+</Page>

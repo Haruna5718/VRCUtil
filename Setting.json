@@ -1,7 +1,11 @@
 {
-	"AutoStart": false,
-	"AutoUpdate": false,
-	"OSCHost": "127.0.0.1",
-	"OSCIn": "9000",
-	"OSCOut": "9001"
+    "system.theme": "system",
+    "settings.osc.send": 9000,
+    "settings.checkUpdate": true,
+    "system.isOnTop": false,
+    "settings.debugLog": false,
+    "settings.osc.receive": 9002,
+    "settings.autoStart": "2",
+    "settings.osc.address": "127.0.0.1",
+    "settings.startMinimized": 0
 }

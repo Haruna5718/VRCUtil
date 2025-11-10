@@ -2,8 +2,8 @@ import wmi
 import threading
 import pythoncom
 from pathlib import Path
-import time
 import logging
+import gc
 
 logger = logging.getLogger("vrcutil.processmanager")
 
@@ -18,41 +18,60 @@ def checkProcessState(path:str):
 		pythoncom.CoUninitialize()
 	return False
 
+import pythoncom
+import win32com.client
+
+class CustomWMI:
+	Creation = "SELECT * FROM __InstanceCreationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'"
+	Deletion = "SELECT * FROM __InstanceDeletionEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_Process'"
+
+	def __init__(self, query, namespace="root\\cimv2"):
+		self.query = query
+		self.namespace = namespace
+		self.locator = None
+		self.service = None
+		self.event_source = None
+
+	def __enter__(self):
+		pythoncom.CoInitialize()
+		self.locator = win32com.client.Dispatch("WbemScripting.SWbemLocator")
+		self.service = self.locator.ConnectServer(".", self.namespace)
+		self.event_source = self.service.ExecNotificationQuery(self.query)
+		return self
+
+	def watch(self):
+		try:
+			return self.event_source.NextEvent()
+		except Exception as e:
+			return None
+
+	def __exit__(self, exc_type, exc_val, exc_tb):
+		if self.event_source:
+			del self.event_source
+		if self.service:
+			del self.service
+		if self.locator:
+			del self.locator
+		pythoncom.CoUninitialize()
+		gc.collect()
+
 class ProcessWatcher:
 	def __init__(self):
 		self.watching = False
 		self.threads:list[threading.Thread] = []
 		self.target = {}
 
-	def _createWatcher(self,type:str):
-		while self.watching:
-			try:
-				watcher = wmi.WMI().Win32_Process.watch_for(type)
-				logger.debug(f"watcher created ({type})")
-				return watcher
-			except Exception as e:
-				logger.error(f"failed to create process watcher, retry in 1 seconds: {e}")
-				time.sleep(1)
-			
 	def _processWatching(self,target):
-		pythoncom.CoInitialize()
-		try:
-			watcher = self._createWatcher("creation" if target else "deletion")
+		logger.debug(f"watcher created ({'creation' if target else 'deletion'})")
+		with CustomWMI(CustomWMI.Creation if target else CustomWMI.Deletion) as watcher:
 			while self.watching:
 				try:
-					if ((process:=getattr(watcher(),"ExecutablePath",None)) in self.target) and self.watching:
+					if ((process:=getattr(watcher.watch(),"ExecutablePath",None)) in self.target) and self.watching:
 						for callback in self.target[process]:
 							threading.Thread(target=callback, args=(process,target,), daemon=True).start()
 				except Exception as e:
 					logger.error(f"An error occurred while watching process: {e}")
-					del watcher
-					watcher = self._createWatcher("creation" if target else "deletion")
-		finally:
-			watcher.stop()
-			del watcher
-			pythoncom.CoUninitialize()
-
-			logger.debug(f"Watcher closed ({'creation' if target else 'deletion'})")
+		logger.debug(f"Watcher closed ({'creation' if target else 'deletion'})")
 		
 	def start(self, creation=True, deletion=True, checkCurrent=False):
 		self.watching = True
@@ -74,9 +93,8 @@ class ProcessWatcher:
 
 	def stop(self):
 		self.watching = False
-		for i in self.threads[:]:
-			i.join()
-		self.threads = []
+		for _ in self.threads[:]:
+			self.threads.pop().join()
 
 	def addTarget(self, path:Path|str, callback):
 		self.target.setdefault(str(Path(path).resolve()),[]).append(callback)

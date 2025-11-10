@@ -1,7 +1,7 @@
 {
     "system.theme": "system",
     "settings.osc.send": 9000,
-    "settings.checkUpdate": true,
+    "settings.checkUpdate": false,
     "system.isOnTop": false,
     "settings.debugLog": false,
     "settings.osc.receive": 9002,

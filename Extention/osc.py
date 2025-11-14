@@ -3,6 +3,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import threading
 import socket
+import datetime
 from zeroconf import ServiceInfo,Zeroconf
 from pathlib import Path
 import logging
@@ -59,6 +60,11 @@ class EasyOSCUDPServer(osc_server.ThreadingOSCUDPServer):
 
 class OSCQueryHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        key = (self.client_address[0], self.path)
+        now = datetime.datetime.now().timestamp()
+        if now - self.server.lastReq.get(key,0) < 1.0:
+            return
+        self.server.lastReq[key] = now
         self.send_response(200)
         self.send_header("Content-type", "application/json")
         self.end_headers()
@@ -80,11 +86,12 @@ class EasyOSCQueryServer(HTTPServer):
         self.isactive: bool = bind_and_activate
         self.zeroconf = Zeroconf()
         self.info = ServiceInfo(
-            type_ = "_oscjson._tcp.local.",
-            name = f"{name}.{port or server_address[1]}._oscjson._tcp.local.",
-            addresses = [socket.inet_aton(host)],
+            "_oscjson._tcp.local.",
+            f"{name}._oscjson._tcp.local.",
+            addresses = [socket.inet_pton(socket.AF_INET, host)],
             port = port or server_address[1],
         )
+        self.lastReq = {}
 
     def shutdown(self):
         threading.Thread(target=self.zeroconf.unregister_service, args=(self.info,), daemon=True).start()
@@ -133,7 +140,7 @@ class EasyOSC:
                 port = None
                 continue
             try:
-                self.oscquery = EasyOSCQueryServer((host, port), name=name, host=host, bind_and_activate=False)
+                self.oscquery = EasyOSCQueryServer(("0.0.0.0", port), name=name, host=host, port=port, bind_and_activate=False)
                 self.oscquery.serveWithBind()
             except Exception as e:
                 logger.warning(f"failed to launch OSCQuery server: {e}")

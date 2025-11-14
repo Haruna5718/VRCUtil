@@ -8,3 +8,5 @@ Modules/
 
 *.lock
 *.spec
+
+Setting.json

@@ -1,11 +1,26 @@
 <Page path="" icon="" name="Dashboard">
-    <Space />
-    <Horizontal>
-        <Space />
-        <Vertical>
-            <Text type="title">Welcom to PyWebWinUI3</Text>
-        </Vertical>
-        <Space />
-    </Horizontal>
-    <Space />
+    <If value="vrcutil.dashboard">
+        <True>
+            <Box>
+                <Horizontal>
+                    <Text> Module : 2</Text>
+                    <Space />
+                    <Text> OSC : {settings.osc.send}    {settings.osc.receive}</Text>
+                </Horizontal>
+            </Box>
+            <Space />
+        </True>
+        <False>
+            <Space />
+            <Horizontal>
+                <Space />
+                <Vertical>
+                    <Text type="title">Welcom to VRCUtil</Text>
+                    <Text color="var(--TextFillColorDisabledBrush)">There’s nothing here… at least not yet.</Text>
+                </Vertical>
+                <Space />
+            </Horizontal>
+            <Space />
+        </False>
+    </If>
 </Page>

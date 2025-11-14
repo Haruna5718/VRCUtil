@@ -3,6 +3,7 @@ import threading
 import pythoncom
 from pathlib import Path
 import logging
+import time
 import gc
 
 logger = logging.getLogger("vrcutil.processmanager")
@@ -31,12 +32,18 @@ class CustomWMI:
 		self.locator = None
 		self.service = None
 		self.event_source = None
+		self.running = True
 
 	def __enter__(self):
 		pythoncom.CoInitialize()
 		self.locator = win32com.client.Dispatch("WbemScripting.SWbemLocator")
 		self.service = self.locator.ConnectServer(".", self.namespace)
-		self.event_source = self.service.ExecNotificationQuery(self.query)
+		while self.running and self.event_source==None:
+			try:
+				self.event_source = self.service.ExecNotificationQuery(self.query)
+			except Exception as e:
+				logger.error(f"An error occurred while connecting to WMI: {e}")
+				time.sleep(1)
 		return self
 
 	def watch(self):
@@ -63,14 +70,14 @@ class ProcessWatcher:
 
 	def _processWatching(self,target):
 		logger.debug(f"watcher created ({'creation' if target else 'deletion'})")
-		with CustomWMI(CustomWMI.Creation if target else CustomWMI.Deletion) as watcher:
-			while self.watching:
-				try:
-					if ((process:=getattr(watcher.watch(),"ExecutablePath",None)) in self.target) and self.watching:
-						for callback in self.target[process]:
-							threading.Thread(target=callback, args=(process,target,), daemon=True).start()
-				except Exception as e:
-					logger.error(f"An error occurred while watching process: {e}")
+		# with CustomWMI(CustomWMI.Creation if target else CustomWMI.Deletion) as watcher:
+		# 	while self.watching:
+		# 		try:
+		# 			if ((process:=getattr(watcher.watch(),"ExecutablePath",None)) in self.target) and self.watching:
+		# 				for callback in self.target[process]:
+		# 					threading.Thread(target=callback, args=(process,target,), daemon=True).start()
+		# 		except Exception as e:
+		# 			logger.error(f"An error occurred while watching process: {e}")
 		logger.debug(f"Watcher closed ({'creation' if target else 'deletion'})")
 		
 	def start(self, creation=True, deletion=True, checkCurrent=False):

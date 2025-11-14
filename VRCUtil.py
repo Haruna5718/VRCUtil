@@ -16,7 +16,6 @@ class VRCUtil(MainWindow):
     def __init__(self, title):
         super().__init__(title)
         threading.Thread(target=self.__initVRCUtil__, daemon=True).start()
-        # self.addPage("Test.xaml",imagePreload=False)
 
     def __initVRCUtil__(self):
         self.processWatcher = ProcessWatcher()
@@ -32,8 +31,8 @@ class VRCUtil(MainWindow):
         
         self.addPage("Dashboard.xaml")
         self.addSettings("Settings.xaml")
-        self.processWatcher.addTarget(self.steam.findSteamAppPath("438100","UnityCrashHandler64.exe"),self._onVRChat)
-        self.processWatcher.addTarget(self.steam.findSteamAppPath("250820","bin/win64/vrcompositor.exe"),self._onSteamVR)
+        self.processWatcher.addTarget(self.steam.findSteamAppPath("438100")/"UnityCrashHandler64.exe",self._onVRChat)
+        self.processWatcher.addTarget(self.steam.findSteamAppPath("250820")/"bin/win64/vrcompositor.exe",self._onSteamVR)
 
     def _onSteamVR(self, path, state):
         if state:
@@ -184,10 +183,13 @@ if __name__ == "__main__":
             
             threading.Thread(target=eventSetup, args=(moduleCore,), daemon=True).start()
 
-            if Widget := loadPage(module/"Widget.xaml"):
-                app.values["system.pages"][""]["child"].append(Widget)
+            if (module/"Widget.xaml").exists():
+                if Widget := loadPage(module/"Widget.xaml"):
+                    app.values["system.pages"][""]["child"][0]["child"][0]["child"].append(Widget)
 
-            app.addPage(module/"Layout.xaml")
+            if (module/"Layout.xaml").exists():
+                app.addPage(module/"Layout.xaml")
+                app.setValue("vrcutil.dashboard",True)
                     
             app.Modules[module.name] = moduleCore
         except Exception as e:

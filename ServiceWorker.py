@@ -1,154 +1,90 @@
-import sys
-import win32event
-import win32service
-import servicemanager
-import win32serviceutil
-from Extention import Steam, ProcessWatcher
+import requests
+import time
+import json
+import logging
+import subprocess
 
-EVENT_ID = 5718
+from vrcutil.file import SafeRead
+from vrcutil import wmi, steam, INSTALL_PATH
 
-# ----------------------------
-
-class VRCUtilServiceWorker(win32serviceutil.ServiceFramework):
-	_svc_name_ = "VRCUtilServiceWorker"
-	_svc_display_name_ = "VRCUtil Service Worker"
-	_svc_description_ = "Detects the launch of VRChat and automatically runs VRCUtil"
-
-	def __init__(self, args):
-		win32serviceutil.ServiceFramework.__init__(self, args)
-		self.exitEvent = win32event.CreateEvent(None,False,False,None)
-		self.processWatcher = ProcessWatcher().addTarget(Steam().findSteamAppPath("438100","UnityCrashHandler64.exe"),self._launchVRCUtil)
-
-	def _launchVRCUtil(self, *_):
-		servicemanager.LogMsg(
-			servicemanager.EVENTLOG_INFORMATION_TYPE,
-			EVENT_ID,
-			("Try to launch VRCUtil",)
-		)
-
-	def SvcStop(self):
-		servicemanager.LogInfoMsg("Service stop requested")
-		self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-		win32event.SetEvent(self.exitEvent)
-
-	def SvcDoRun(self):
-		self.ReportServiceStatus(win32service.SERVICE_START_PENDING)
-		servicemanager.LogInfoMsg("VRChat Watcher Service starting")
-
-		self.processWatcher.start(deletion=False)
-		
-		self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-
-		win32event.WaitForSingleObject(self.exitEvent, win32event.INFINITE)
-
-		self.processWatcher.stop()
-		
-		servicemanager.LogInfoMsg("Service stopped")
-		self.ReportServiceStatus(win32service.SERVICE_STOPPED)
+logger = logging.getLogger("vrcutil.serviceworker")
 
 # ----------------------------
 
-if __name__ == '__main__':
-	if len(sys.argv) == 1:
-		servicemanager.Initialize()
-		servicemanager.PrepareToHostSingle(VRCUtilServiceWorker)
-		servicemanager.StartServiceCtrlDispatcher()
+class StateManager:
+	def __init__(self):
+		self.processWatcher = wmi.ProcessWatcher()
+		self.state = {
+			"SteamVR": False,
+			"VRChat": False
+		}
+		self.syncPath = None
+		self.synced = False
+		self.processWatcher.addTarget(INSTALL_PATH/"VRCUtil.exe", self.onVRCUtil)
+		try:
+			self.processWatcher.addTarget(steam.findApp("438100")/"UnityCrashHandler64.exe", self.onVRChat)
+		except:
+			pass
+		try:
+			self.processWatcher.addTarget(steam.findApp("250820")/"bin/win64/vrcompositor.exe", self.onSteamVR)
+		except:
+			pass
+		self.processWatcher.start(checkCurrent=True)
 
-	else:
-		import ctypes
-		def isAdmin():
+	def syncState(self):
+		if not self.synced and self.syncPath:
+			self.synced = True
 			try:
-				return ctypes.windll.shell32.IsUserAnAdmin()
-			except:
-				return False
-	
-		if not isAdmin():
-			ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
-			sys.exit(0)
+				for _ in range(5):
+					try:
+						return requests.post(self.syncPath, json=self.state)
+					except:
+						logger.warning(f"Failed to connect to VRCUtil instance for state sync \"{self.syncPath}\". Retrying...")
+						time.sleep(1)
+						self.onVRCUtil(_, True)
+			finally:
+				self.synced = False
+			logger.error(f"Failed to connect to VRCUtil instance for state sync.")
+			self.syncPath = None
 
-		import subprocess
-
-		if '--install' in sys.argv:
-			
-			import os
-			import winreg
-			import tempfile
-			from pathlib import Path
-					
-			try:
-				win32serviceutil.InstallService(
-					pythonClassString=f"{__name__}.{VRCUtilServiceWorker.__name__}",
-					serviceName=VRCUtilServiceWorker._svc_name_,
-					displayName=VRCUtilServiceWorker._svc_display_name_,
-					description=VRCUtilServiceWorker._svc_description_,
-					startType=win32service.SERVICE_AUTO_START
-				)
-				print("Service installed successfully.")
-
-				with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\VRCUtil") as key:
-					VRCUtilPath = str(Path(winreg.QueryValueEx(key, "InstallLocation")[0])/"VRCUtil.exe")
-
-				with tempfile.NamedTemporaryFile(delete=False, suffix=".xml", mode="w", encoding="utf-16") as f:
-					f.write(f'''<?xml version="1.0" encoding="UTF-16"?>
-						<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-							<Triggers>
-								<EventTrigger>
-									<Enabled>true</Enabled>
-									<Subscription>&lt;QueryList&gt;&lt;Query Path="Application"&gt;&lt;Select Path="Application"&gt;*[System[Provider[@Name='{VRCUtilServiceWorker._svc_name_}'] and EventID={EVENT_ID}]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
-								</EventTrigger>
-							</Triggers>
-							<Actions>
-								<Exec>
-									<Command>{VRCUtilPath} --vrchat</Command>
-								</Exec>
-							</Actions>
-							<Settings>
-								<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-								<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-								<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-								<AllowHardTerminate>true</AllowHardTerminate>
-								<StartWhenAvailable>true</StartWhenAvailable>
-								<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-								<Enabled>true</Enabled>
-								<Hidden>false</Hidden>
-								<RunOnlyIfIdle>false</RunOnlyIfIdle>
-								<WakeToRun>false</WakeToRun>
-							</Settings>
-						</Task>
-					''')
-					tempXml = f.name
-				
-				result = subprocess.run(['schtasks', '/create', '/tn', "VRCUtilAutoStart", '/xml', tempXml, '/f'], check=True)
-				os.remove(tempXml)
-				print("Task created successfully.")
-				
-				win32serviceutil.StartService(VRCUtilServiceWorker._svc_name_)
-				print("Service started successfully.")
-				
-			except Exception as e:
-				print(f"Installation failed: {e}")
-
-		elif '--remove' in sys.argv:
-			try:
-				try:
-					win32serviceutil.StopService(VRCUtilServiceWorker._svc_name_)
-					print("Service stopped.")
-				except Exception:
-					pass
-					
-				win32serviceutil.RemoveService(VRCUtilServiceWorker._svc_name_)
-				print("Service removed successfully.")
-
-				subprocess.run(['schtasks', '/delete', '/tn', "VRCUtilAutoStart", '/f'], check=True)
-				print("Task deleted successfully.")
-
-			except Exception as e:
-				print(f"Removal failed: {e}")
-
+	def onVRCUtil(self, path, state):
+		if state:
+			self.syncPath = SafeRead(INSTALL_PATH/"VRCUtil.lock")
+			print(self.syncPath)
+			self.syncState()
 		else:
-			print("Use --install to install or --remove to uninstall the service.")
-			print("Run without arguments to start as a service.")
+			if not (self.syncPath and wmi.Check(path)):
+				self.syncPath = None
 
-# ----------------------------
+
+	def onVRChat(self, _, state):
+		if self.state["VRChat"]==state:
+			return
+		self.state["VRChat"] = state
+		self.syncState()
+		if state and json.loads(SafeRead(INSTALL_PATH/"VRCUtil.lock")).get("settings.autoStart","0") == "2":
+			subprocess.Popen([str(INSTALL_PATH/"VRCUtil.exe")])
+
+	def onSteamVR(self, _, state):
+		if self.state["SteamVR"]==state:
+			return
+		self.state["SteamVR"] = state
+		self.syncState()
+
+
+if __name__ == "__main__" and not wmi.Check(INSTALL_PATH/"ServiceWorker.exe"):
+	logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(levelname)-8s | %(asctime)s | %(name)-30s | %(message)s",
+        datefmt="%H:%M:%S"
+    )
+	stateManager = StateManager()
+	while True:
+		try:
+			time.sleep(1)
+		except KeyboardInterrupt:
+			break
+	stateManager.processWatcher.stop()
+	logger.info("ServiceWorker exited.")
 
 # pyinstaller --onefile ServiceWorker.py

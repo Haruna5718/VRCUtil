@@ -1,11 +1,11 @@
-from pythonosc import osc_server, udp_client, dispatcher
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import http.server
 import json
 import threading
 import socket
 import datetime
-from zeroconf import ServiceInfo,Zeroconf
-from pathlib import Path
+from pythonosc import osc_server, udp_client, dispatcher
+import zeroconf
+import pathlib
 import logging
 
 logger = logging.getLogger("vrcutil.osc")
@@ -27,7 +27,7 @@ class VRChatOSCEvent:
     
     @classmethod
     def onAvatarParameterChange(cls, Parameter):
-        return cls._setHandler(str(Path("/avatar/parameters")/Parameter))
+        return cls._setHandler(str(pathlib.Path("/avatar/parameters")/Parameter))
     
     @classmethod
     def onAvatarChange(cls):
@@ -58,7 +58,7 @@ class EasyOSCUDPServer(osc_server.ThreadingOSCUDPServer):
         finally:
             self.isactive = False
 
-class OSCQueryHandler(BaseHTTPRequestHandler):
+class OSCQueryHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         key = (self.client_address[0], self.path)
         now = datetime.datetime.now().timestamp()
@@ -80,12 +80,12 @@ class OSCQueryHandler(BaseHTTPRequestHandler):
             }
         }).encode())
 
-class EasyOSCQueryServer(HTTPServer):
+class EasyOSCQueryServer(http.server.HTTPServer):
     def __init__(self, server_address: tuple[str, int], name:str, host:str, port:int=None, bind_and_activate: bool = True):
         super().__init__(server_address, OSCQueryHandler, bind_and_activate)
         self.isactive: bool = bind_and_activate
-        self.zeroconf = Zeroconf()
-        self.info = ServiceInfo(
+        self.zeroconf = zeroconf.Zeroconf()
+        self.info = zeroconf.ServiceInfo(
             "_oscjson._tcp.local.",
             f"{name}._oscjson._tcp.local.",
             addresses = [socket.inet_pton(socket.AF_INET, host)],

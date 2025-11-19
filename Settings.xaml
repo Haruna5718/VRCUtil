@@ -14,15 +14,13 @@
         <Horizontal>
             <Text> Auto start</Text>
             <Space />
-            <Vertical>
-                <Select value="settings.autoStart">
-                    <Option value="0"> Disable Auto start</Option>
-                    <Option value="1"> Start with SteamVR</Option>
-                    <Option value="2"> Start with VRChat</Option>
-                    <Option value="3"> Start with System</Option>
-                </Select>
-                <!-- <Check value="settings.startMinimized">Start minimized</Check> -->
-            </Vertical>
+            <Select value="settings.autoStart">
+                <Option value="0"> Disable Auto start</Option>
+                <Option value="1"> Start with SteamVR</Option>
+                <Option value="2"> Start with VRChat</Option>
+                <Option value="3"> Start with System</Option>
+            </Select>
+            <!-- <Check value="settings.startMinimized">Start minimized</Check> -->
         </Horizontal>
     </Box>
     <Box>
@@ -63,7 +61,6 @@
             <Text> Debug log</Text>
             <Space />
             <Button type="link" value="vrcutil.openLog">Open log</Button>
-            <Switch value="settings.debugLog"/>
         </Horizontal>
     </Box>
 </Page>

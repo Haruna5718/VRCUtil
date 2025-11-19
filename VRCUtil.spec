@@ -4,7 +4,11 @@ name = "VRCUtil"
 icon = "app.ico"
 file = "main.py"
 data = [
-    ('.venv/Lib/site-packages/pywebwinui3/web', 'pywebwinui3/web')
+    ('.venv/Lib/site-packages/pywebwinui3/web', 'pywebwinui3/web'),
+    ('.venv/Lib/site-packages/customtkinter/assets', 'customtkinter/assets')
+]
+module = [
+    "customtkinter"
 ]
 
 a = Analysis(
@@ -834,7 +838,8 @@ a = Analysis(
         "zoneinfo",
         "zoneinfo._common",
         "zoneinfo._tzpath",
-        "zoneinfo._zoneinfo"
+        "zoneinfo._zoneinfo",
+        *module
     ],
     hookspath=[],
     hooksconfig={},

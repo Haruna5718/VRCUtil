@@ -19,24 +19,32 @@ registry.ExtConnector.connect(
     ext = "vrcutilmodule",
     target = INSTALL_PATH/"ModuleInstaller.exe",
     description = "VRCUtil Module File",
-    icon = INSTALL_PATH/"ModuleInstaller.exe"
+    icon = INSTALL_PATH/"app.ico"
 )
 
-registry.Program.install(
-    id = "VRCUtil",
-    name = "VRCUtil",
-    icon = INSTALL_PATH/"VRCUtil.exe",
-    version = __version__,
-    author = "Haruna5718",
-    uninstaller = INSTALL_PATH/"Uninstall.exe",
-    installDir = INSTALL_PATH,
-    installDate = datetime.datetime.now()
-)
+# registry.ExtConnector.connect(
+#     id = "VRCUtilModuleFile",
+#     ext = "vrcutilmodule",
+#     target = INSTALL_PATH/"ModuleInstaller.exe",
+#     description = "VRCUtil Module File",
+#     icon = INSTALL_PATH/"ModuleInstaller.exe"
+# )
 
-registry.Program.setAutostart(
-    name = "VRCUtil Service Worker",
-    path = INSTALL_PATH/"ServiceWorker.exe"
-)
-createShortcut(INSTALL_PATH/"VRCUtil.exe",pathlib.Path.home()/"AppData"/"Roaming"/"Microsoft"/"Windows"/"Start Menu"/"Programs"/"VRCUtil.lnk")
+# registry.Program.install(
+#     id = "VRCUtil",
+#     name = "VRCUtil",
+#     icon = INSTALL_PATH/"VRCUtil.exe",
+#     version = __version__,
+#     author = "Haruna5718",
+#     uninstaller = INSTALL_PATH/"Uninstall.exe",
+#     installDir = INSTALL_PATH,
+#     installDate = datetime.datetime.now()
+# )
 
-createShortcut(INSTALL_PATH/"VRCUtil.exe",pathlib.Path.home()/"Desktop"/"VRCUtil.lnk")
+# registry.Program.setAutostart(
+#     name = "VRCUtil Service Worker",
+#     path = INSTALL_PATH/"ServiceWorker.exe"
+# )
+# createShortcut(INSTALL_PATH/"VRCUtil.exe",pathlib.Path.home()/"AppData"/"Roaming"/"Microsoft"/"Windows"/"Start Menu"/"Programs"/"VRCUtil.lnk")
+
+# createShortcut(INSTALL_PATH/"VRCUtil.exe",pathlib.Path.home()/"Desktop"/"VRCUtil.lnk")

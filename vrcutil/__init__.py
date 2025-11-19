@@ -8,9 +8,13 @@ __version__ = '3.0.0-dev'
 
 IS_DEBUG = not getattr(sys, 'frozen', False)
 
-INSTALL_PATH = pathlib.Path(__file__).parent.parent.resolve() if IS_DEBUG else pathlib.Path("C:/Program Files/VRCUtil/")
-DATA_PATH = INSTALL_PATH if IS_DEBUG else pathlib.Path.home()/"AppData"/"Local"/"VRCUtil"
-MODULES_PATH = DATA_PATH/"Modules"
+# INSTALL_PATH = pathlib.Path(__file__).parent.parent.resolve() if IS_DEBUG else pathlib.Path("C:/Program Files/VRCUtil/")
+# DATA_PATH = INSTALL_PATH if IS_DEBUG else pathlib.Path.home()/"AppData"/"Local"/"VRCUtil"
+# MODULES_PATH = DATA_PATH/"Modules"
+
+INSTALL_PATH = pathlib.Path(r"C:\Users\Haruna5718\OneDrive\code\Project\VRCUtil\dist\VRCUtil")
+DATA_PATH = INSTALL_PATH
+MODULES_PATH = INSTALL_PATH/"Modules"
 
 
 from . import event, file, osc, pip, registry, steam, wmi

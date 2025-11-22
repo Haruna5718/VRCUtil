@@ -1,20 +1,24 @@
-from vrcutil.file import SafeOpen, EasySetting
+from vrcutil import VRCUtil, __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH
+from vrcutil.file import SafeOpen, SafeRead, EasySetting
 import sys
 
-lockFile = SafeOpen("VRCUtil.lock", "w", wait=False)
+lockFile = SafeOpen(INSTALL_PATH/"VRCUtil.lock", "w", wait=False)
 if lockFile == None:
     sys.exit(1)
 
-from pywebwinui3 import loadPage, Notice
 import threading
 import bottle
-from pathlib import Path
 import json
 import time
 import logging
+import urllib.request
 import subprocess
+import importlib.util
+import traceback
+from pathlib import Path
 
-from vrcutil import VRCUtil, __version__, MODULES_PATH, INSTALL_PATH
+from pywebwinui3 import loadPage, Notice
+
 from vrcutil.osc import EasyOSC
 from vrcutil.wmi import Check
 
@@ -38,64 +42,61 @@ from Logger import open_log_window
 app = VRCUtil("VRCUtil")
 
 app.setValue("system.version", __version__)
-app.setValue("system.icon", "./app.ico")
+app.setValue("system.icon", "./VRCUtil.ico")
 
 @app.onValueChange("settings.checkUpdate")
 def checkUpdate(*_):
     if app.values.get("settings.checkUpdate", False):
         try:
             app.setValue("system.latest", "fetching")
-            import requests
-            return app.setValue("system.latest", requests.get("https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest").json()["tag_name"])
+            with urllib.request.urlopen("https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest") as resp:
+                return app.setValue("system.latest", json.loads(resp.read().decode("utf-8"))["tag_name"])
         except:
             pass
     app.setValue("system.latest", "unknown")
 
-def settingDataInit():
-    with SafeOpen("Setting.json", "r+", encoding="utf-8") as f:
-        setting = json.load(f)
-        settingValues = {
-            "system.theme": "system",
-            "system.isOnTop": False,
-            "settings.osc.address": "127.0.0.1",
-            "settings.osc.send": 9000,
-            "settings.osc.receive": 30000,
-            "settings.autoStart": "0",
-            "settings.checkUpdate": False,
-            "settings.startMinimized": False
-        }
-        for k,v in settingValues.items():
-            app.setValue(k, setting.setdefault(k, v))
-        f.seek(0)
-        f.truncate()
-        json.dump(setting, f, ensure_ascii=False, indent=4)
+@EasySetting.useData(DATA_PATH/"Setting.json")
+def settingDataInit(setting):
+    settingValues = {
+        "system.theme": "system",
+        "system.isOnTop": False,
+        "settings.osc.address": "127.0.0.1",
+        "settings.osc.send": 9000,
+        "settings.osc.receive": 9999,
+        "settings.autoStart": "0",
+        "settings.checkUpdate": False,
+        "settings.startMinimized": False
+    }
+    for k,v in settingValues.items():
+        app.setValue(k, setting.setdefault(k, v))
+
     app.osc = EasyOSC(app.getValue("system.title"),app.getValue("settings.osc.address"),int(app.getValue("settings.osc.send")),int(app.getValue("settings.osc.receive")))
     
     threading.Thread(target=app.api.setTop, args=(app.getValue("system.isOnTop"),), daemon=True).start()
     threading.Thread(target=loadModule, daemon=True).start()
     threading.Thread(target=checkUpdate, daemon=True).start()
 
-    @app.onValueChange("settings.osc.address")
-    @app.onValueChange("settings.osc.send")
-    def reInitClient(*_):
-        app.osc._initClient(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.send")))
-    
-    @app.onValueChange("settings.osc.address")
-    @app.onValueChange("settings.osc.receive")
-    def reInitServer(*_):
-        app.osc.ServerRecreateFlag = getattr(app.osc,'ServerRecreateFlag',0)+1
-        currentFlag = getattr(app.osc,'ServerRecreateFlag')
-        time.sleep(1)
-        if app.osc.ServerRecreateFlag==currentFlag and app.osc.server.server_address!=(address:=(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.receive")))):
-            app.osc._initServer(app.getValue("system.title"),*address)
+@app.onValueChange("settings.osc.address")
+@app.onValueChange("settings.osc.send")
+def reInitClient(*_):
+    app.osc._initClient(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.send")))
 
-    @app.onValueChange("system.theme")
-    @app.onValueChange("system.isOnTop")
-    @app.onValueChange("settings.*")
-    @EasySetting.useData()
-    def saveSettings(key:str, before, after, setting:dict):
-        setting[key] = after
-        return setting
+@app.onValueChange("settings.osc.address")
+@app.onValueChange("settings.osc.receive")
+def reInitServer(*_):
+    app.osc.ServerRecreateFlag = getattr(app.osc,'ServerRecreateFlag',0)+1
+    currentFlag = getattr(app.osc,'ServerRecreateFlag')
+    time.sleep(1)
+    if app.osc.ServerRecreateFlag==currentFlag and app.osc.server.server_address!=(address:=(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.receive")))):
+        app.osc._initServer(app.getValue("system.title"),*address)
+
+@app.onValueChange("system.theme")
+@app.onValueChange("system.isOnTop")
+@app.onValueChange("settings.*")
+@EasySetting.useData()
+def saveSettings(key:str, before, after, setting:dict):
+    setting[key] = after
+    return setting
 
 def loadModule():
     modules = [i for i in (MODULES_PATH).iterdir() if i.is_dir() and not i.name.startswith("_")]
@@ -119,23 +120,20 @@ def eventSetup(targetClass):
             app.osc.addHandler(path,callback)
 
 def moduleSetup(module:Path):
-    import importlib.util
-    import traceback
-
     try:
+        moduleInfo:dict = json.loads(SafeRead(module/"module.json"))
+        moduleName        = moduleInfo.get("name","Unknown")
+        moduleVersion     = moduleInfo.get("version","Unknown")
+        moduleAuthor      = moduleInfo.get("author","Unknown")
+        moduleDescription = moduleInfo.get("description","Unknown")
+        moduleUrls        = moduleInfo.get("urls","Unknown")
+        logger.info(f"Loading Module\n{' '*53}| ├─ Name: {moduleName}\n{' '*53}| ├─ Path: {module.name}\n{' '*53}| ├─ Version: {moduleVersion}\n{' '*53}| ├─ Author: {moduleAuthor}\n{' '*53}| ├─ Description: {moduleDescription}\n{' '*53}| └─ Urls: {moduleUrls}")
+        
         Spec = importlib.util.spec_from_file_location("Function", module/"Function.py")
         Module = importlib.util.module_from_spec(Spec)
         Spec.loader.exec_module(Module)
 
-        moduleClass = getattr(Module, module.name)
-
-        moduleVersion = getattr(moduleClass, "Version", "Unknown")
-        moduleAuthor = getattr(moduleClass, "Author", "Unknown")
-        moduleDescription = getattr(moduleClass, "Description", "Unknown")
-        moduleUrls = getattr(moduleClass, "Urls", "Unknown")
-        logger.info(f"Loading Module\n{' '*53}| ├─ Name: {module.name}\n{' '*53}| ├─ Version: {moduleVersion}\n{' '*53}| ├─ Author: {moduleAuthor}\n{' '*53}| ├─ Description: {moduleDescription}\n{' '*53}| └─ Urls: {moduleUrls}")
-
-        moduleCore = moduleClass(app)
+        moduleCore = getattr(Module, module.name)(app)
         
         threading.Thread(target=eventSetup, args=(moduleCore,), daemon=True).start()
 
@@ -160,8 +158,8 @@ def setLockfile():
     lockFile.flush()
     if not Check(INSTALL_PATH/"ServiceWorker.exe"):
         try:
-            subprocess.Popen([str(INSTALL_PATH/"ServiceWorker.exe")])
-            logger.error(f"ServiceWorker launched.")
+            subprocess.Popen([str(INSTALL_PATH/"ServiceWorker.exe")],creationflags=0x08000000)
+            logger.info(f"ServiceWorker launched.")
         except Exception as e:
             logger.error(f"Failed to start ServiceWorker: {e}")
 
@@ -187,5 +185,5 @@ def CloseServices():
 def openlog(*_):
     open_log_window()
 
-threading.Thread(target=settingDataInit,daemon=True).start()
+settingDataInit()
 app.start("debug" in sys.argv)

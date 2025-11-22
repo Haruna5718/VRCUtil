@@ -11,15 +11,15 @@ logger = logging.getLogger("vrcutil.wmi")
 def Check(path:str|Path):
 	pythoncom.CoInitialize()
 	try:
-		if [i for i in wmi.WMI().Win32_Process(name=str(Path(path).name)) if i.ExecutablePath==str(path)]:
+		if count:=len([i for i in wmi.WMI().Win32_Process(name=str(Path(path).name)) if i.ExecutablePath==str(path)]):
 			logger.info(f"Process checked (True): {path}")
-			return True
+			return count
 	except:
 		pass
 	finally:
 		pythoncom.CoUninitialize()
 	logger.info(f"Process checked (False): {path}")
-	return False
+	return 0
 
 class Watcher:
 	Creation = "creation"

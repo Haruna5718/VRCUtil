@@ -7,10 +7,16 @@ import webbrowser
 import sys
 import ctypes
 import enum
-import logging
+import subprocess
 
 if len(sys.argv) < 2:
     sys.exit(1)
+
+if "debug" in sys.argv:
+    ctypes.windll.kernel32.AllocConsole()
+    sys.stdout = open("CONOUT$", "w")
+    sys.stderr = open("CONOUT$", "w")
+    sys.stdin  = open("CONIN$", "r")
 
 modulePath = pathlib.Path(sys.argv[1])
 
@@ -18,7 +24,7 @@ import customtkinter
 
 from pywebwinui3 import getSystemAccentColor, systemMessageListener
 
-from vrcutil import pip, MODULES_PATH
+from vrcutil import MODULES_PATH, INSTALL_PATH
 
 def darken(hex:str, factor:float = 0.1) -> str:
     hex = hex.lstrip("#")
@@ -44,10 +50,11 @@ class UrlButtonColors(enum.Enum):
     Discord = ["#5865F2","#4F5AD9","#ffffff"]
 
 class ModuleInstaller(customtkinter.CTk):
-    def __init__(self, title="VRCUtil Module Installer", size="400x200"):
+    def __init__(self, title="VRCUtil Module Installer", size="400x200", icon=INSTALL_PATH/"VRCUtil.ico"):
         super().__init__()
         self.title(title)
         self.geometry(size)
+        self.iconbitmap(icon)
         self.accentItems:list[customtkinter.CTkButton] = []
         self.init()
         self._applyAccentColor(getSystemAccentColor())
@@ -111,16 +118,6 @@ class VRCUtilButton(customtkinter.CTkButton):
     def setStatus(self, state:bool, text=None):
         self.configure(text=text or self._text, state="normal" if state else "disabled", fg_color=(self.master.accentColor[4],self.master.accentColor[1]) if state else ("#fefefe","#3e3e3e"))
 
-class logHandler(logging.Handler):
-    def __init__(self, callback):
-        super().__init__()
-        self.callback = callback
-        self.setLevel(logging.INFO)
-        self.setFormatter(logging.Formatter("\n%(message)s"))
-
-    def emit(self, record):
-        self.callback(self.format(record))
-
 class ModuleInstallPage(customtkinter.CTkFrame):
     def __init__(self, master:ModuleInstaller):
         super().__init__(master)
@@ -140,10 +137,6 @@ class ModuleInstallPage(customtkinter.CTkFrame):
         threading.Thread(target=self.install,daemon=True).start()
 
     def install(self):
-        log = logging.getLogger("vrcutil.pip")
-        log.setLevel(logging.INFO)
-        log.addHandler(logHandler(lambda msg: self.after(0, lambda: self.log(msg))))
-
         try:
             with zip_ref.open("requirements.txt") as f:
                 requirements = [line.strip() for line in f.read().decode("utf-8").splitlines() if line.strip()]
@@ -164,15 +157,16 @@ class ModuleInstallPage(customtkinter.CTkFrame):
 
         for info in file_list:
             if info.is_dir():
-                self.after(0, lambda: self.work())
                 self.after(0, lambda name=info.filename: self.log(f"\nExtract: {name}"))
+                self.after(0, lambda: self.work())
             else:
+                self.after(0, lambda name=info.filename: self.log(f"\nExtract: {name}"))
                 zip_ref.extract(info, path)
                 self.after(0, lambda: self.work())
-                self.after(0, lambda name=info.filename: self.log(f"\nExtract: {name}"))
 
         for moduleName in requirements:
-            pip.install_module(moduleName)
+            self.after(0, lambda name=moduleName: self.log(f"\nPackage install: {name}"))
+            subprocess.run([str(INSTALL_PATH/"_internal/pip.exe"), "install", "--no-cache-dir", moduleName, "--target", str(INSTALL_PATH / "_internal")],creationflags=subprocess.CREATE_NO_WINDOW)
             self.after(0, lambda: self.work())
 
     def work(self):

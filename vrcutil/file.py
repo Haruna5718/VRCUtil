@@ -7,15 +7,16 @@ import win32file
 import win32con
 
 class SafeOpen:
-	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=True):
+	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=False):
 		self.path = pathlib.Path(path)
 		self.mode = mode
 		self.encoding = encoding
-		self.file = self._open(wait)
-		if touch:
-			self.path.touch()
+		self.file = self._open(wait, touch)
 
-	def _open(self, isWait):
+	def _open(self, isWait, isTouch):
+		if isTouch:
+			self.path.parent.mkdir(parents=True,exist_ok=True)
+			self.path.touch()
 		while True:
 			try:
 				f = open(self.path, self.mode, encoding=self.encoding)
@@ -62,8 +63,13 @@ def SafeRead(path: str|pathlib.Path) -> str:
 			0,
 			None
 		)
-		win32file.SetFilePointer(handle, 1, win32file.FILE_BEGIN)
-		return win32file.ReadFile(handle, win32file.GetFileSize(handle))[1].decode("utf-8", errors="ignore")
+		try:
+			win32file.SetFilePointer(handle, 0, win32file.FILE_BEGIN)
+			return win32file.ReadFile(handle, win32file.GetFileSize(handle))[1].decode("utf-8", errors="ignore")
+		except:
+			win32file.SetFilePointer(handle, 1, win32file.FILE_BEGIN)
+			return win32file.ReadFile(handle, win32file.GetFileSize(handle))[1].decode("utf-8", errors="ignore")
+
 	finally:
 		if handle:
 			win32file.CloseHandle(handle)
@@ -78,8 +84,12 @@ class EasySetting:
 		def decorator(func):
 			@functools.wraps(func)
 			def wrapper(*args, **kwargs):
-				with SafeOpen(cls._getPath(func,settingFile), "r+") as f:
-					result = func(*args, **kwargs, setting=json.load(f))
+				with SafeOpen(cls._getPath(func,settingFile), "r+", touch=True) as f:
+					try:
+						data = json.load(f)
+					except:
+						data = {}
+					result = func(*args, **kwargs, setting=data)
 					if result:
 						f.seek(0)
 						f.truncate()
@@ -95,7 +105,7 @@ class EasySetting:
 			def wrapper(*args, **kwargs):
 				result = func(*args, **kwargs)
 				if result:
-					with SafeOpen(cls._getPath(func,settingFile), "w") as f:
+					with SafeOpen(cls._getPath(func,settingFile), "w", touch=True) as f:
 						json.dump(result, f, ensure_ascii=False, indent=4)
 				return result
 			return wrapper
@@ -106,8 +116,11 @@ class EasySetting:
 		def decorator(func):
 			@functools.wraps(func)
 			def wrapper(*args, **kwargs):
-				with SafeOpen(cls._getPath(func,settingFile), "r") as f:
-					data = json.load(f)
+				with SafeOpen(cls._getPath(func,settingFile), "r", touch=True) as f:
+					try:
+						data = json.load(f)
+					except:
+						data = {}
 				result = func(*args, **kwargs, setting=data)
 				return result
 			return wrapper

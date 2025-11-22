@@ -1,47 +1,46 @@
-# -*- mode: python ; coding: utf-8 -*-
-
-name = "ModuleInstaller"
-icon = "app.ico"
-file = "ModuleInstaller.py"
+target = {
+    "name": "VRCUtil-Installer",
+    "file": "install.py",
+    "icon": "VRCUtil.ico"
+}
+file = [
+    ('.venv/Lib/site-packages/customtkinter', 'customtkinter'),
+    ('dist/VRCUtil', 'data'),
+    ('VRCUtil.ico', '.')
+]
 
 a = Analysis(
-    [file],
+    [target['file']],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=file,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    noarchive=True,
+    noarchive=False,
     optimize=0,
 )
 
 exe = EXE(
     PYZ(a.pure),
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
-    name=name,
-    icon=[icon],
+    name=target['name'],
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name=name,
+    icon=[target['icon']],
 )

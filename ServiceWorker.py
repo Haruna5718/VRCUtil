@@ -33,7 +33,7 @@ class AutostartCondition(enum.Enum):
 def VRCUtilAutostart(Condition:AutostartCondition):
 	try:
 		if json.loads(SafeRead(DATA_PATH/"Setting.json")).get("settings.autoStart",AutostartCondition.Disable.value) == Condition.value:
-			subprocess.Popen([str(INSTALL_PATH/"VRCUtil.exe")])
+			subprocess.Popen([str(INSTALL_PATH/"VRCUtil.exe"), "auto"])
 			logger.info(f"VRCUtil launched ({Condition.name})")
 	except:
 		logger.error("Failed to check VRCUtil autostart setting")

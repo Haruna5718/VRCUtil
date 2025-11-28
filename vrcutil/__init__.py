@@ -5,6 +5,8 @@ import bottle
 import sys
 import os
 import webview
+import pystray
+import PIL.Image
 
 __version__ = '3.0.0-dev'
 
@@ -26,16 +28,21 @@ __all__ = ["event", "file", "osc", "registry", "steam", "wmi"]
 
 
 class VRCUtil(pywebwinui3.MainWindow):
-    def __init__(self, title):
+    def __init__(self, title, icon):
         super().__init__(title)
         self.basePath = INSTALL_PATH
 
-        threading.Thread(target=self.__initVRCUtil__, daemon=True).start()
+        self.osc = osc.EasyOSC(title, init=False)
 
-    def __initVRCUtil__(self):
+        threading.Thread(target=self.__initVRCUtil__, args=(title, icon,), daemon=True).start()
+
+    def __initVRCUtil__(self, title, icon):
+        self.api.minimize = self.api._window.minimize
+        self.api.destroy = self.api._window.hide
+        self.api._window.hidden = True
 
         self.steam = steam.VR(INSTALL_PATH/"manifest.vrmanifest")
-        self.osc:osc.EasyOSC = None
+        
         self.Modules = {}
         self.eventStatus = {}
 
@@ -48,11 +55,17 @@ class VRCUtil(pywebwinui3.MainWindow):
         self.addPage("Dashboard.xaml")
         self.addSettings("Settings.xaml")
 
-    def start(self, debug=False):
+        self.setValue("vrcutil.version", __version__)
+        self.setValue("system.icon", icon)
+        self.tray = VRCUtilTray(self, title, icon, start=True)
+
+    def start(self, debug=False, minimized=False, onTop=False):
+        WEB_PATH = pathlib.Path(pywebwinui3.__file__).parent
+
         @self.server.route('/')
         @self.server.route('/PYWEBWINUI3/<filepath:path>')
         def web(filepath=None):
-            return bottle.static_file(filepath or "index.html", root=str(INSTALL_PATH/("_internal/pywebwinui3/web/PYWEBWINUI3" if filepath else "_internal/pywebwinui3/web")))
+            return bottle.static_file(filepath or "index.html", root=str(WEB_PATH/("web/PYWEBWINUI3" if filepath else "web")))
         
         @self.server.route('/<filepath:path>')
         def file(filepath):
@@ -61,7 +74,36 @@ class VRCUtil(pywebwinui3.MainWindow):
             if (INSTALL_PATH/filepath).is_file():
                 return bottle.static_file(filepath, root=str(INSTALL_PATH))
             
-        webview.start(self._setup,debug=debug)
+        self.api._window.on_top = onTop
+        self.api._window.hidden = minimized
+
+        webview.start(self._setup, debug=debug)
+
+class VRCUtilTray(pystray.Icon):
+    def __init__(self, app:VRCUtil, title, icon, start=False):
+        self.app = app
+        super().__init__(
+            title,
+            PIL.Image.open(icon),
+            title,
+            pystray.Menu(
+                pystray.MenuItem("Open", self.open, default=True),
+                pystray.MenuItem("Exit", self.exit)
+            )
+        )
+        if start:
+            threading.Thread(target=self.start, daemon=True).start()
+
+    def open(self):
+        self.app.api._window.show()
+        self.app.api._window.restore()
+
+    def exit(self):
+        self.stop()
+        self.app.api._window.destroy()
+    
+    def start(self):
+        self.run()
 
 class Module:
 	def __init__(self):

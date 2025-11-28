@@ -19,7 +19,6 @@ from pathlib import Path
 
 from pywebwinui3 import loadPage, Notice
 
-from vrcutil.osc import EasyOSC
 from vrcutil.wmi import Check
 
 logger = logging.getLogger("vrcutil")
@@ -39,21 +38,18 @@ logging.basicConfig(
 
 from Logger import open_log_window
 
-app = VRCUtil("VRCUtil")
-
-app.setValue("system.version", __version__)
-app.setValue("system.icon", "./VRCUtil.ico")
+app = VRCUtil("VRCUtil","./VRCUtil.ico")
 
 @app.onValueChange("settings.checkUpdate")
 def checkUpdate(*_):
     if app.values.get("settings.checkUpdate", False):
         try:
-            app.setValue("system.latest", "fetching")
+            app.setValue("vrcutil.latest", "fetching")
             with urllib.request.urlopen("https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest") as resp:
-                return app.setValue("system.latest", json.loads(resp.read().decode("utf-8"))["tag_name"])
+                return app.setValue("vrcutil.hasUpdate", '0' if app.setValue("vrcutil.latest", json.loads(resp.read().decode("utf-8"))["tag_name"])!=__version__ else '')
         except:
             pass
-    app.setValue("system.latest", "unknown")
+    app.setValue("vrcutil.latest", "unknown")
 
 @EasySetting.useData(DATA_PATH/"Setting.json")
 def settingDataInit(setting):
@@ -62,7 +58,7 @@ def settingDataInit(setting):
         "system.isOnTop": False,
         "settings.osc.address": "127.0.0.1",
         "settings.osc.send": 9000,
-        "settings.osc.receive": 9999,
+        "settings.osc.receive": 0,
         "settings.autoStart": "0",
         "settings.checkUpdate": False,
         "settings.startMinimized": False
@@ -70,25 +66,29 @@ def settingDataInit(setting):
     for k,v in settingValues.items():
         app.setValue(k, setting.setdefault(k, v))
 
-    app.osc = EasyOSC(app.getValue("system.title"),app.getValue("settings.osc.address"),int(app.getValue("settings.osc.send")),int(app.getValue("settings.osc.receive")))
+    initClient()
+    initServer(direct=True)
     
-    threading.Thread(target=app.api.setTop, args=(app.getValue("system.isOnTop"),), daemon=True).start()
+    # threading.Thread(target=app.api.setTop, args=(app.getValue("system.isOnTop"),), daemon=True).start()
     threading.Thread(target=loadModule, daemon=True).start()
     threading.Thread(target=checkUpdate, daemon=True).start()
 
 @app.onValueChange("settings.osc.address")
 @app.onValueChange("settings.osc.send")
-def reInitClient(*_):
+def initClient(*_):
     app.osc._initClient(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.send")))
 
 @app.onValueChange("settings.osc.address")
 @app.onValueChange("settings.osc.receive")
-def reInitServer(*_):
-    app.osc.ServerRecreateFlag = getattr(app.osc,'ServerRecreateFlag',0)+1
-    currentFlag = getattr(app.osc,'ServerRecreateFlag')
-    time.sleep(1)
-    if app.osc.ServerRecreateFlag==currentFlag and app.osc.server.server_address!=(address:=(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.receive")))):
-        app.osc._initServer(app.getValue("system.title"),*address)
+def initServer(*_, direct=False):
+    if not direct:
+        app.osc.ServerRecreateFlag = getattr(app.osc,'ServerRecreateFlag',0)+1
+        currentFlag = getattr(app.osc,'ServerRecreateFlag')
+        time.sleep(1)
+        if app.osc.ServerRecreateFlag!=currentFlag or app.osc.server.server_address==(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.receive"))):
+            return
+    app.osc._initServer(app.getValue("system.title"),app.getValue("settings.osc.address"),int(app.getValue("settings.osc.receive")))
+    app.setValue("vrcutil.osc.receive",app.osc.server.server_address[1])
 
 @app.onValueChange("system.theme")
 @app.onValueChange("system.isOnTop")
@@ -143,9 +143,9 @@ def moduleSetup(module:Path):
 
         if (module/"Layout.xaml").exists():
             app.addPage(module/"Layout.xaml")
-            app.setValue("vrcutil.dashboard",True)
                 
         app.Modules[module.name] = moduleCore
+        app.setValue("vrcutil.moduleCount",len(app.Modules))
     except Exception as e:
         logger.error(f"Failed to load module <{module.name}>\n{traceback.format_exc()}")
         app.notice(Notice.Error, f"Failed to load module {module.name}", str(e))
@@ -186,4 +186,9 @@ def openlog(*_):
     open_log_window()
 
 settingDataInit()
-app.start("debug" in sys.argv)
+
+app.start(
+    debug = "debug" in sys.argv,
+    minimized = (("auto" in sys.argv) and app.getValue("settings.startMinimized",False)),
+    onTop = app.getValue("system.isOnTop",False)    
+)

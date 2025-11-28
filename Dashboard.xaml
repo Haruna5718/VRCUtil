@@ -1,11 +1,11 @@
 <Page path="" icon="" name="Dashboard">
-    <If value="vrcutil.dashboard">
+    <If value="vrcutil.moduleCount">
         <True>
             <Box>
                 <Horizontal>
-                    <Text> Module : 2</Text>
+                    <Text> Module : {vrcutil.moduleCount}</Text>
                     <Space />
-                    <Text> OSC : {settings.osc.send}    {settings.osc.receive}</Text>
+                    <Text> OSC : {settings.osc.send}    {vrcutil.osc.receive}</Text>
                 </Horizontal>
             </Box>
             <Space />

@@ -27,7 +27,7 @@ class VRChatOSCEvent:
     
     @classmethod
     def onAvatarParameterChange(cls, Parameter):
-        return cls._setHandler(str(pathlib.Path("/avatar/parameters")/Parameter))
+        return cls._setHandler((pathlib.Path("/avatar/parameters")/Parameter).as_posix())
     
     @classmethod
     def onAvatarChange(cls):
@@ -115,13 +115,14 @@ class EasyOSCQueryServer(http.server.HTTPServer):
             self.isactive = False
 
 class EasyOSC:
-    def __init__(self, name:str, host:str="127.0.0.1", clientPort:int=9000, serverPort:int=None):
+    def __init__(self, name:str, host:str=None, clientPort:int=None, serverPort:int=None, init=True):
         self.client:udp_client.SimpleUDPClient = None
         self.server:EasyOSCUDPServer = None
         self.oscquery:EasyOSCQueryServer = None
         self._dispatcher = dispatcher.Dispatcher()
-        threading.Thread(target=self._initClient, args=(host,clientPort,), daemon=True).start()
-        threading.Thread(target=self._initServer, args=(name,host,serverPort,), daemon=True).start()
+        if init:
+            threading.Thread(target=self._initClient, args=(host,clientPort,), daemon=True).start()
+            threading.Thread(target=self._initServer, args=(name,host,serverPort,), daemon=True).start()
 
     def _initClient(self, host:str, port:int):
         self.client = udp_client.SimpleUDPClient(host, port)

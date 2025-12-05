@@ -1,17 +1,17 @@
+import gc
 import wmi
+import time
+import pathlib
+import logging
 import threading
 import pythoncom
-from pathlib import Path
-import logging
-import time
-import gc
 
 logger = logging.getLogger("vrcutil.wmi")
 
-def Check(path:str|Path):
+def Check(path:str|pathlib.Path):
 	pythoncom.CoInitialize()
 	try:
-		if count:=len([i for i in wmi.WMI().Win32_Process(name=str(Path(path).name)) if i.ExecutablePath==str(path)]):
+		if count:=len([i for i in wmi.WMI().Win32_Process(name=str(pathlib.Path(path).name)) if i.ExecutablePath==str(path)]):
 			logger.info(f"Process checked (True): {path}")
 			return count
 	except:
@@ -96,7 +96,7 @@ class ProcessWatcher:
 			i.join()
 		self.threads = []
 
-	def addTarget(self, path:Path|str, callback):
-		self.target.setdefault(str(Path(path).resolve()),[]).append(callback)
+	def addTarget(self, path:pathlib.Path|str, callback):
+		self.target.setdefault(str(pathlib.Path(path).resolve()),[]).append(callback)
 		logger.info(f"Target registered: {path}")
 		return self

@@ -7,23 +7,14 @@ def _setEvent(*eventData):
 		return func
 	return decorator
 
-def onSetup():
-	return _setEvent("setup")
-
 def onExit():
-	return _setEvent("exit")
+	return _setEvent("closed")
 
 def onValueChange(key):
-	return _setEvent("setValue", key)
+	return _setEvent("valueChange", key)
 
-def onSteamVRStart():
-	return _setEvent("steamVRStart")
+def onSteamVRStateChange():
+	return _setEvent("valueChange", "steamvr_state")
 
-def onSteamVRStop():
-	return _setEvent("steamVRStop")
-
-def onVRChatStart():
-	return _setEvent("vrchatStart")
-
-def onVRChatStop():
-	return _setEvent("vrchatStop")
+def onVRChatStateChange():
+	return _setEvent("valueChange", "vrchat_state")

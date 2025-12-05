@@ -1,34 +1,36 @@
-import functools
-import pathlib
 import json
 import time
 import msvcrt
-import win32file
+import pathlib
 import win32con
+import threading
+import functools
+import win32file
 
 class SafeOpen:
 	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=False):
 		self.path = pathlib.Path(path)
 		self.mode = mode
 		self.encoding = encoding
-		self.file = self._open(wait, touch)
+		self.file = None
+		self._open(wait, touch)
 
 	def _open(self, isWait, isTouch):
 		if isTouch:
-			self.path.parent.mkdir(parents=True,exist_ok=True)
+			self.path.parent.mkdir(parents=True, exist_ok=True)
 			self.path.touch()
 		while True:
 			try:
 				f = open(self.path, self.mode, encoding=self.encoding)
-				try:
-					msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-					self.file = f
-					return self.file
-				except OSError:
-					f.close()
-					time.sleep(0.01)
+				msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+				self.file = f
+				return self.file
 			except (OSError, PermissionError):
 				if isWait:
+					try:
+						f.close()
+					except:
+						pass
 					time.sleep(0.01)
 				else:
 					return None
@@ -69,7 +71,6 @@ def SafeRead(path: str|pathlib.Path) -> str:
 		except:
 			win32file.SetFilePointer(handle, 1, win32file.FILE_BEGIN)
 			return win32file.ReadFile(handle, win32file.GetFileSize(handle))[1].decode("utf-8", errors="ignore")
-
 	finally:
 		if handle:
 			win32file.CloseHandle(handle)
@@ -125,3 +126,37 @@ class EasySetting:
 				return result
 			return wrapper
 		return decorator
+	
+class BufferedJsonSaver:
+	def __init__(self, path:str|pathlib.Path):
+		self.path = path
+		self._saveTimer = None
+		self._bufferTime = 1
+		self._saveBuffer:dict[str] = {}
+
+	def save(self, key, value):
+		self._saveBuffer[key] = value
+		self._saveSchedule()
+
+	def _saveSchedule(self):
+		if self._saveTimer and self._saveTimer.is_alive():
+			return
+		self._saveTimer = threading.Timer(self._bufferTime, self._saveData)
+		self._saveTimer.start()
+
+	def _saveData(self):
+		with SafeOpen(self.path, "r+", touch=True) as f:
+			try:
+				data = json.load(f)
+				changed = {k: v for k, v in self._saveBuffer.items() if data.get(k) != v}
+			except:
+				data = {}
+				changed = self._saveBuffer
+
+			if changed:
+				data.update(changed)
+				f.seek(0)
+				f.truncate()
+				json.dump(data, f, ensure_ascii=False, indent=4)
+
+		self._saveBuffer.clear()

@@ -1,20 +1,20 @@
 import vdf
 import json
 import logging
-from pathlib import Path
+import pathlib
 
-from .file import SafeRead
 from . import registry
+from .file import SafeRead
 
 logger = logging.getLogger("vrcutil.steam")
 
 _installPath = None
 _libraryData = None
 
-def installPath() -> Path:
+def installPath() -> pathlib.Path:
 	global _installPath
 	if not _installPath:
-		_installPath = Path(registry.read(registry.targetType.localMachine, r"Software\WOW6432Node\Valve\Steam", "installPath")[0])
+		_installPath = pathlib.Path(registry.read(registry.targetType.localMachine, r"Software\WOW6432Node\Valve\Steam", "installPath")[0])
 		logger.debug(f"Steam installed path checked: {_installPath}")
 	return _installPath
 		
@@ -22,7 +22,7 @@ def libraryData() -> dict:
 	global _libraryData
 	if not _libraryData:
 		data = vdf.load(open(installPath()/"steamapps"/"libraryfolders.vdf", encoding="utf-8"))
-		_libraryData = {Path(item.get("path"))/"steamapps":list(item.get("apps",{}).keys()) for item in data.get("libraryfolders",{}).values()}
+		_libraryData = {pathlib.Path(item.get("path"))/"steamapps":list(item.get("apps",{}).keys()) for item in data.get("libraryfolders",{}).values()}
 		logger.debug(f"Steam library data collected ({len(_libraryData)})")
 	return _libraryData
 
@@ -35,8 +35,8 @@ def findApp(appid:str) -> str:
 class VR:
 	VRCONFIG_DIR = "config/appconfig.json"
 	APPCONFIG_DIR = "config/vrappconfig"
-	def __init__(self, manifest:Path|str):
-		self.manifest = Path(manifest)
+	def __init__(self, manifest:pathlib.Path|str):
+		self.manifest = pathlib.Path(manifest)
 		self._manifestData = None
 		self._name = None
 		self._config = None
@@ -52,7 +52,7 @@ class VR:
 		return self._name
 
 	@property
-	def config(self) -> Path:
+	def config(self) -> pathlib.Path:
 		self._config = self._config or installPath()/self.APPCONFIG_DIR/f"{self.name}.vrappconfig"
 		return self._config
 	

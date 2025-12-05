@@ -9,3 +9,6 @@ Modules/
 *.lock
 
 Setting.json
+
+pyinstaller/
+upx.exe

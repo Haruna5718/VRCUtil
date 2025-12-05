@@ -1,12 +1,12 @@
-import http.server
 import json
-import threading
 import socket
-import datetime
-from pythonosc import osc_server, udp_client, dispatcher
-import zeroconf
 import pathlib
 import logging
+import datetime
+import zeroconf
+import threading
+import http.server
+from pythonosc import osc_server, udp_client, dispatcher
 
 logger = logging.getLogger("vrcutil.osc")
 
@@ -120,6 +120,7 @@ class EasyOSC:
         self.server:EasyOSCUDPServer = None
         self.oscquery:EasyOSCQueryServer = None
         self._dispatcher = dispatcher.Dispatcher()
+        self._namedHandler = {}
         if init:
             threading.Thread(target=self._initClient, args=(host,clientPort,), daemon=True).start()
             threading.Thread(target=self._initServer, args=(name,host,serverPort,), daemon=True).start()
@@ -163,11 +164,11 @@ class EasyOSC:
     def send(self, path, value):
         self.client.send_message(path, value)
 
-    def addHandler(self, path:str, callback, *args: list, needs_reply_address: bool = False):
-        self._dispatcher.map(path, callback, *args, needs_reply_address)
+    def addHandler(self, path:str, id:str, callback, *args: list, needs_reply_address: bool = False):
+        self._namedHandler[id] = self._dispatcher.map(path, callback, *args, needs_reply_address)
 
-    def removeHandler(self, path:str, callback):
-        self._dispatcher.unmap(path, callback)
+    def removeHandler(self, path:str, id:str):
+        self._dispatcher.unmap(path, self._namedHandler[id])
 
     def getHandlers(self, path:str=None, callback=None):
         m = self._dispatcher._map

@@ -1,13 +1,12 @@
-from vrcutil import VRCUtil, __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH
-from vrcutil.file import SafeOpen, SafeRead, EasySetting
+from vrcutil import __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH, IS_DEBUG
+from vrcutil.file import SafeOpen, SafeRead, EasySetting, BufferedJsonSaver
 import sys
 
 lockFile = SafeOpen(INSTALL_PATH/"VRCUtil.lock", "w", wait=False)
-if lockFile == None:
+if lockFile.file == None:
     sys.exit(1)
 
 import threading
-import bottle
 import json
 import time
 import logging
@@ -17,13 +16,14 @@ import importlib.util
 import traceback
 from pathlib import Path
 
-from pywebwinui3 import loadPage, Notice
+from pywebwinui3.util import loadPage
+from pywebwinui3.core import Status
 
+from vrcutil.core import VRCUtil, Module, logger
 from vrcutil.wmi import Check
 
-logger = logging.getLogger("vrcutil")
-
 logging.getLogger("asyncio").setLevel(logging.INFO)
+logging.getLogger("PIL.Image").setLevel(logging.INFO)
 
 pywebviewLogger = logging.getLogger("pywebview")
 [pywebviewLogger.removeHandler(i) for i in pywebviewLogger.handlers[:]]
@@ -40,115 +40,98 @@ from Logger import open_log_window
 
 app = VRCUtil("VRCUtil","./VRCUtil.ico")
 
-@app.onValueChange("settings.checkUpdate")
+@app.onValueChange("settings_checkUpdate")
 def checkUpdate(*_):
-    if app.values.get("settings.checkUpdate", False):
+    if app.values.get("settings_checkUpdate", False):
         try:
-            app.setValue("vrcutil.latest", "fetching")
+            app.values.set("vrcutil_latest", "fetching")
             with urllib.request.urlopen("https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest") as resp:
-                return app.setValue("vrcutil.hasUpdate", '0' if app.setValue("vrcutil.latest", json.loads(resp.read().decode("utf-8"))["tag_name"])!=__version__ else '')
+                return app.values.set("vrcutil_hasUpdate", '0' if app.values.set("vrcutil_latest", json.loads(resp.read().decode("utf-8"))["tag_name"])!=__version__ else '')
         except:
             pass
-    app.setValue("vrcutil.latest", "unknown")
+    app.values.set("vrcutil_latest", "unknown")
 
 @EasySetting.useData(DATA_PATH/"Setting.json")
-def settingDataInit(setting):
+def settingDataInit(setting:dict):
+    settingSaver = BufferedJsonSaver(DATA_PATH/"Setting.json")
     settingValues = {
-        "system.theme": "system",
-        "system.isOnTop": False,
-        "settings.osc.address": "127.0.0.1",
-        "settings.osc.send": 9000,
-        "settings.osc.receive": 0,
-        "settings.autoStart": "0",
-        "settings.checkUpdate": False,
-        "settings.startMinimized": False
+        "system_theme": "system",
+        "system_pin": False,
+        "settings_osc_address": "127.0.0.1",
+        "settings_osc_send": 9000,
+        "settings_osc_receive": 0,
+        "settings_autoStart": "0",
+        "settings_checkUpdate": False,
+        "settings_startMinimized": False
     }
     for k,v in settingValues.items():
-        app.setValue(k, setting.setdefault(k, v))
+        app.values.set(k, setting.setdefault(k, v))
+
+    app.events.valueChange += ("system_theme", lambda k,_,v: settingSaver.save(k,v))
+    app.events.valueChange += ("system_pin", lambda k,_,v: settingSaver.save(k,v))
+    app.events.valueChange += ("settings_*", lambda k,_,v: settingSaver.save(k,v))
 
     initClient()
     initServer(direct=True)
     
-    # threading.Thread(target=app.api.setTop, args=(app.getValue("system.isOnTop"),), daemon=True).start()
     threading.Thread(target=loadModule, daemon=True).start()
     threading.Thread(target=checkUpdate, daemon=True).start()
 
-@app.onValueChange("settings.osc.address")
-@app.onValueChange("settings.osc.send")
+@app.onValueChange("settings_osc_address")
+@app.onValueChange("settings_osc_send")
 def initClient(*_):
-    app.osc._initClient(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.send")))
+    if (address:=app.values.get("settings_osc_address")) and (port:=app.values.get("settings_osc_send")):
+        if not app.osc.client or app.osc.client._port!=port or app.osc.client._address!=address:
+            app.osc._initClient(app.values["settings_osc_address"],int(app.values["settings_osc_send"]))
 
-@app.onValueChange("settings.osc.address")
-@app.onValueChange("settings.osc.receive")
+@app.onValueChange("settings_osc_address")
+@app.onValueChange("settings_osc_receive")
 def initServer(*_, direct=False):
     if not direct:
         app.osc.ServerRecreateFlag = getattr(app.osc,'ServerRecreateFlag',0)+1
         currentFlag = getattr(app.osc,'ServerRecreateFlag')
         time.sleep(1)
-        if app.osc.ServerRecreateFlag!=currentFlag or app.osc.server.server_address==(app.getValue("settings.osc.address"),int(app.getValue("settings.osc.receive"))):
+        if app.osc.ServerRecreateFlag!=currentFlag or app.osc.server.server_address==(app.values["settings_osc_address"],int(app.values["settings_osc_receive"])):
             return
-    app.osc._initServer(app.getValue("system.title"),app.getValue("settings.osc.address"),int(app.getValue("settings.osc.receive")))
-    app.setValue("vrcutil.osc.receive",app.osc.server.server_address[1])
-
-@app.onValueChange("system.theme")
-@app.onValueChange("system.isOnTop")
-@app.onValueChange("settings.*")
-@EasySetting.useData()
-def saveSettings(key:str, before, after, setting:dict):
-    setting[key] = after
-    return setting
+    app.osc._initServer(app.values["system_title"],app.values["settings_osc_address"],int(app.values["settings_osc_receive"]))
+    app.values.set("vrcutil_osc_receive",app.osc.server.server_address[1])
 
 def loadModule():
-    modules = [i for i in (MODULES_PATH).iterdir() if i.is_dir() and not i.name.startswith("_")]
+    modules = [i for i in MODULES_PATH.iterdir() if i.is_dir() and not i.name.startswith("_")]
     for module in modules:
         threading.Thread(target=moduleSetup, args=(module,), daemon=True).start()
 
-def eventSetup(targetClass):
-    import inspect
-    for _, callback in inspect.getmembers(targetClass):
-        function = getattr(callback, "__func__", callback)
-
-        eventDatas = getattr(function, "__VRCUtil_Events__", [])
-        for eventData in eventDatas:
-            if len(eventData)==1:
-                getattr(app.events,eventData[0]).__iadd__(callback)
-            else:
-                getattr(app.events,eventData[0]).append(eventData[1],callback)
-
-        oscHandlers = getattr(function, "__VRCUtil_OSCListen__", [])
-        for path in oscHandlers:
-            app.osc.addHandler(path,callback)
-
-def moduleSetup(module:Path):
+def moduleSetup(path:Path):
     try:
-        moduleInfo:dict = json.loads(SafeRead(module/"module.json"))
-        moduleName        = moduleInfo.get("name","Unknown")
-        moduleVersion     = moduleInfo.get("version","Unknown")
-        moduleAuthor      = moduleInfo.get("author","Unknown")
-        moduleDescription = moduleInfo.get("description","Unknown")
-        moduleUrls        = moduleInfo.get("urls","Unknown")
-        logger.info(f"Loading Module\n{' '*53}| ├─ Name: {moduleName}\n{' '*53}| ├─ Path: {module.name}\n{' '*53}| ├─ Version: {moduleVersion}\n{' '*53}| ├─ Author: {moduleAuthor}\n{' '*53}| ├─ Description: {moduleDescription}\n{' '*53}| └─ Urls: {moduleUrls}")
-        
-        Spec = importlib.util.spec_from_file_location("Function", module/"Function.py")
-        Module = importlib.util.module_from_spec(Spec)
-        Spec.loader.exec_module(Module)
+        Spec = importlib.util.spec_from_file_location(path.name, path/"__init__.py")
+        module = importlib.util.module_from_spec(Spec)
+        Spec.loader.exec_module(module)
 
-        moduleCore = getattr(Module, module.name)(app)
-        
-        threading.Thread(target=eventSetup, args=(moduleCore,), daemon=True).start()
-
-        if (module/"Widget.xaml").exists():
-            if Widget := loadPage(module/"Widget.xaml"):
-                app.values["system.pages"][""]["child"][0]["child"][0]["child"].append(Widget)
-
-        if (module/"Layout.xaml").exists():
-            app.addPage(module/"Layout.xaml")
-                
-        app.Modules[module.name] = moduleCore
-        app.setValue("vrcutil.moduleCount",len(app.Modules))
+        moduleClass:Module = getattr(module, path.name)(app)
+        app.Modules[path.name] = moduleClass
+        app.values.append("vrcutil_modules",[path.name, moduleClass.__name__, moduleClass.__version__, moduleClass.__description__, moduleClass.__urls__])
     except Exception as e:
-        logger.error(f"Failed to load module <{module.name}>\n{traceback.format_exc()}")
-        app.notice(Notice.Error, f"Failed to load module {module.name}", str(e))
+        logger.error(f"Failed to load module {path.name}\n{traceback.format_exc()}")
+        app.notice(Status.Critical, f"Failed to load module {path.name}", str(e))
+
+@app.onValueChange("vrcutil_restart")
+def restart(*_):
+    app.tray.exit()
+    time.sleep(1)
+    subprocess.Popen(r"C:\Users\Haruna5718\OneDrive\code\Project\VRCUtil\.venv\Scripts\python.exe c:/Users/Haruna5718/OneDrive/code/Project/VRCUtil/VRCUtil.py")
+
+@app.onValueChange("vrcutil_removeModule_*")
+def removeModule(key, *_):
+    moduleName = key[21:]
+    moduleClass = app.Modules[moduleName]
+    [app.values.remove("vrcutil_modules",i) for i in app.values["vrcutil_modules"] if i[0]==moduleName]
+    if getattr(moduleClass,"__layout__",None):
+        del app.values['system_pages'][moduleName]
+    if getattr(moduleClass,"__widget__",None):
+        app.values["system_pages"][""]["child"][0]["child"][0]["child"].remove(moduleClass.__widget__)
+    app.values._sync("system_pages",None,app.values["system_pages"],True)
+    del app.Modules[moduleName]
+    app.notice(Status.Attention, "Restart required", f"please restart for remove {moduleName} completly",{"tag":"Button","text":"Restart","attr":{"value":"vrcutil_restart"},"child":[]})
 
 @app.onSetup()
 def setLockfile():
@@ -156,32 +139,20 @@ def setLockfile():
     lockFile.truncate()
     lockFile.write(app.api._window._server.address)
     lockFile.flush()
-    if not Check(INSTALL_PATH/"ServiceWorker.exe"):
-        try:
-            subprocess.Popen([str(INSTALL_PATH/"ServiceWorker.exe")],creationflags=0x08000000)
-            logger.info(f"ServiceWorker launched.")
-        except Exception as e:
-            logger.error(f"Failed to start ServiceWorker: {e}")
-
-@app.server.post('/')
-def syncState():
-    data = bottle.request.json
-    logger.info(f"Sync state received: {data}")
-    for k, v in data.items():
-        if app.eventStatus.get(k) != v:
-            app.eventStatus[k] = v
-            eventname = f"{k}{'Start' if v else 'Stop'}"
+    if not IS_DEBUG:
+        if not Check(INSTALL_PATH/"ServiceWorker.exe"):
             try:
-                getattr(app.events, eventname).set()
-                logger.debug(f"{eventname} event triggered")
+                subprocess.Popen([str(INSTALL_PATH/"ServiceWorker.exe")],creationflags=0x08000000)
+                logger.info(f"ServiceWorker launched.")
             except Exception as e:
-                logger.warning(f"Unknown event \"{eventname}\": {e}")
+                logger.error(f"Failed to start ServiceWorker\n{traceback.format_exc()}")
 
 @app.onExit()
 def CloseServices():
+    lockFile.close()
     app.osc.stop()
 
-@app.onValueChange("vrcutil.openLog")
+@app.onValueChange("vrcutil_openLog")
 def openlog(*_):
     open_log_window()
 
@@ -189,6 +160,6 @@ settingDataInit()
 
 app.start(
     debug = "debug" in sys.argv,
-    minimized = (("auto" in sys.argv) and app.getValue("settings.startMinimized",False)),
-    onTop = app.getValue("system.isOnTop",False)    
+    minimized = ("auto" in sys.argv) and app.values.get("settings_startMinimized", False),
+    onTop = app.values.get("system_pin", False)
 )

@@ -1,12 +1,12 @@
+import enum
 import winreg
 import pathlib
-import enum
 import datetime
 import logging
 
 logger = logging.getLogger("vrcutil.registry")
 
-class valueType(enum.Enum):
+class valueType(enum.IntEnum):
     str = winreg.REG_SZ
     strPATH = winreg.REG_EXPAND_SZ
     int32 = winreg.REG_DWORD
@@ -15,28 +15,28 @@ class valueType(enum.Enum):
     bytes = winreg.REG_BINARY
     none = winreg.REG_NONE
 
-class targetType(enum.Enum):
+class targetType(enum.IntEnum):
     currentUser = winreg.HKEY_CURRENT_USER
     localMachine = winreg.HKEY_LOCAL_MACHINE
 
 def create(target:targetType, path:str, name:str, type:valueType, value):
-    with winreg.CreateKey(target.value, path) as key:
-        winreg.SetValueEx(key, name, 0, type.value, value)
+    with winreg.CreateKey(target, path) as key:
+        winreg.SetValueEx(key, name, 0, type, value)
 
 def delete(target:targetType, path:str, name:str=None):
     try:
-        with winreg.OpenKey(target.value, path, 0, winreg.KEY_SET_VALUE|winreg.KEY_READ) as key:
+        with winreg.OpenKey(target, path, 0, winreg.KEY_SET_VALUE|winreg.KEY_READ) as key:
             if name:
                 winreg.DeleteValue(key, name)
             else:
                 for i in range(winreg.QueryInfoKey(key)[0] - 1, -1, -1):
                     delete(fr"{path}\{winreg.EnumKey(key, i)}")
-        winreg.DeleteKeyEx(target.value, path)
+        winreg.DeleteKeyEx(target, path)
     except FileNotFoundError:
         pass
 
 def read(target:targetType, path:str, name:str):
-    with winreg.OpenKey(target.value, path) as key:
+    with winreg.OpenKey(target, path) as key:
         return winreg.QueryValueEx(key, name)
 
 class ExtConnector:

@@ -1,9 +1,9 @@
-<Page path="settings" icon="" name="Settings" title="Settings" state="{vrcutil.hasUpdate}">
+<Page path="settings" icon="" name="Settings" title="Settings" state="{vrcutil_hasUpdate}">
     <Box>
         <Horizontal>
             <Text> App theme</Text>
             <Space />
-            <Select value="system.theme">
+            <Select value="system_theme">
                 <Option value="dark"> Dark</Option>
                 <Option value="light"> Light</Option>
                 <Option value="system"> Use system setting</Option>
@@ -14,13 +14,10 @@
         <Horizontal gap="10px">
             <Text> Auto start</Text>
             <Space />
-            <Match value="settings.autoStart">
-				<Case value="0" />
-				<Case>
-                    <Check value="settings.startMinimized" align="left">Minimize</Check>
-				</Case>
-			</Match>
-            <Select value="settings.autoStart">
+            <If data="{settings_autoStart!='0'}">
+				<Check value="settings_startMinimized" align="left">Minimize</Check>
+			</If>
+            <Select value="settings_autoStart">
                 <Option value="0"> Disable Auto start</Option>
                 <Option value="1"> Start with SteamVR</Option>
                 <Option value="2"> Start with VRChat</Option>
@@ -34,15 +31,15 @@
             <Space />
             <Vertical gap="0" align="left">
                 <Text type="description">Address</Text>
-                <Input value="settings.osc.address" width="115px">Address</Input>
+                <Input value="settings_osc_address" width="115px">Address</Input>
             </Vertical>
             <Vertical gap="0" align="left">
                 <Text type="description">Send</Text>
-                <Input value="settings.osc.send" width="115px" type="number" min="0" max="65535">Port</Input>
+                <Input value="settings_osc_send" width="115px" type="number" min="0" max="65535">Port</Input>
             </Vertical>
             <Vertical gap="0" align="left">
                 <Text type="description">Receive</Text>
-                <Input value="settings.osc.receive" width="115px" type="number" min="0" max="65535">Port</Input>
+                <Input value="settings_osc_receive" width="115px" type="number" min="0" max="65535">Port</Input>
             </Vertical>
         </Horizontal>
     </Box>
@@ -51,26 +48,26 @@
             <Horizontal>
                 <Text> Modules</Text>
                 <Space />
-                <Text type="description">{vrcutil.moduleCount} Modules loaded</Text>
+                <Text type="description">{vrcutil_modules.length} Modules loaded</Text>
             </Horizontal>
         </Header>
-        <Content>
-            <Repeat data="vrcutil.module">
-                <Box>
+        <Content padding="8px">
+            <Repeat data="{vrcutil_modules.length}">
+                <Box padding="8px">
                     <Horizontal>
                         <Vertical gap="0" align="left">
-                            <Horizontal>
-                                <Text>{1}</Text>
-                                <Text type="description">{2}</Text>
+                            <Horizontal gap="6px" align="center">
+                                <Text>{vrcutil_modules[{i}][1]}</Text>
+                                <Text type="description">{vrcutil_modules[{i}][2]}</Text>
                             </Horizontal>
-                            <Text type="description">{3}</Text>
+                            <Text type="description">{vrcutil_modules[{i}][3]}</Text>
                         </Vertical>
                         <Space />
-                        <Repeat raw="{4}">
-                            <Button></Button>
-                        </Repeat>
-                        <Switch value="vrcutil.module.toggle.{0}" on="Enable" off="Disable"/>
-                        <Button value="vrcutil.module.remove.{0}">Remove</Button>
+                        <!-- <Repeat data="{vrcutil_modules[{i}][4]}">
+                            <Button type="link" url="vrcutil_modules[{i}][4]"></Button>
+                        </Repeat> -->
+                        <!-- <Switch value="vrcutil_module_toggle_{vrcutil_modules[{i}][0]}" on="Enable" off="Disable"/> -->
+                        <Button value="vrcutil_removeModule_{vrcutil_modules[{i}][0]}">Remove</Button>
                     </Horizontal>
                 </Box>
             </Repeat>
@@ -85,39 +82,55 @@
                 <Text type="description">Latest:</Text>
             </Vertical>
             <Vertical gap="0" align="left">
-                <Text type="description">{vrcutil.version}</Text>
-                <Text type="description">{vrcutil.latest}</Text>
+                <Text type="description">{vrcutil_version}</Text>
+                <Text type="description">{vrcutil_latest}</Text>
             </Vertical>
-            <Switch value="settings.checkUpdate"/>
+            <Switch value="settings_checkUpdate"/>
         </Horizontal>
     </Box>
     <!-- <Box>
         <Horizontal>
             <Text> Debug log</Text>
             <Space />
-            <Button type="link" value="vrcutil.openLog">Open log</Button>
+            <Button type="link" value="vrcutil_openLog">Open log</Button>
         </Horizontal>
     </Box> -->
     <Expender>
         <Header>
             <Horizontal>
-                <Text> License</Text>
-                <Space />
-                <Text type="description">{vrcutil.version}</Text>
-                <!-- <Text type="link" url="https://github.com/Haruna5718/VRCUtil/blob/master/LICENSE">Apache License 2.0</Text> -->
-            </Horizontal>
-        </Header>
-        <Content>
-            <Horizontal>
-                <Image source="{system.icon}" height="30px"/>
+                <Image source="{system_icon}" height="30px"/>
                 <Vertical gap="0" align="left" margin="0 6px">
                     <Text>VRCUtil</Text>
-                    <Text type="description">ⓒ 2025. Haruna5718 All rights reserved.</Text>
+                    <Text type="description" size="10px">ⓒ 2025. Haruna5718 All rights reserved.</Text>
                 </Vertical>
                 <Space />
                 <Button type="link" url="https://haruna5718.booth.pm/items/6516021">Booth</Button>
                 <Button type="link" url="https://github.com/Haruna5718/VRCUtil">Github</Button>
+                <Button type="link" url="https://discord.gg/MCVkS9ZUpF">Discord</Button>
             </Horizontal>
+        </Header>
+        <!-- <Content>
+            <Horizontal>
+                <Text>Support</Text>
+                <Space />
+            </Horizontal>
+        </Content> -->
+        <Content align="left">
+            <Text type="description">
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+            </Text>
+            <Text type="description" url="https://www.apache.org/licenses/LICENSE-2.0">
+https://www.apache.org/licenses/LICENSE-2.0 
+            </Text>
+            <Text type="description">
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+            </Text>
         </Content>
         <Content>
             <Horizontal>
@@ -130,6 +143,8 @@
                 <Text type="description" url="https://github.com/moses-palmer/pystray">pystray </Text>
                 <Text type="description"></Text>
                 <Text type="description" url="https://customtkinter.tomschimansky.com/">CustomTkinter </Text>
+                <Text type="description"></Text>
+                <Text type="description" url="https://github.com/orioncactus/pretendard">Pretendard </Text>
             </Horizontal>
         </Content>
     </Expender>

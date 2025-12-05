@@ -1,12 +1,12 @@
 from vrcutil import wmi, steam, INSTALL_PATH,DATA_PATH
 import sys
-import ctypes
 
 if "debug" in sys.argv:
-    ctypes.windll.kernel32.AllocConsole()
-    sys.stdout = open("CONOUT$", "w")
-    sys.stderr = open("CONOUT$", "w")
-    sys.stdin  = open("CONIN$", "r")
+	import ctypes
+	ctypes.windll.kernel32.AllocConsole()
+	sys.stdout = open("CONOUT$", "w")
+	sys.stderr = open("CONOUT$", "w")
+	sys.stdin  = open("CONIN$", "r")
 
 elif wmi.Check(INSTALL_PATH/"ServiceWorker.exe")>1:
 	sys.exit(1)
@@ -24,7 +24,7 @@ logger = logging.getLogger("vrcutil.serviceworker")
 
 # ----------------------------
 
-class AutostartCondition(enum.Enum):
+class AutostartCondition(enum.IntEnum):
 	Disable="0"
 	SteamVR="1"
 	VRChat="2"
@@ -32,7 +32,7 @@ class AutostartCondition(enum.Enum):
 
 def VRCUtilAutostart(Condition:AutostartCondition):
 	try:
-		if json.loads(SafeRead(DATA_PATH/"Setting.json")).get("settings.autoStart",AutostartCondition.Disable.value) == Condition.value:
+		if json.loads(SafeRead(DATA_PATH/"Setting.json")).get("settings_autoStart",AutostartCondition.Disable) == Condition:
 			subprocess.Popen([str(INSTALL_PATH/"VRCUtil.exe"), "auto"])
 			logger.info(f"VRCUtil launched ({Condition.name})")
 	except:
@@ -42,8 +42,8 @@ class StateManager:
 	def __init__(self):
 		self.processWatcher = wmi.ProcessWatcher()
 		self.state = {
-			"SteamVR": False,
-			"VRChat": False
+			"steamvr": False,
+			"vrchat": False
 		}
 		self.synced = False
 		self.processWatcher.addTarget(INSTALL_PATH/"VRCUtil.exe", self.onVRCUtil)
@@ -83,13 +83,13 @@ class StateManager:
 	def onVRChat(self, _, state):
 		if state:
 			VRCUtilAutostart(AutostartCondition.VRChat)
-		self.state["VRChat"] = state
+		self.state["vrchat"] = state
 		self.syncState()
 
 	def onSteamVR(self, _, state):
 		if state:
 			VRCUtilAutostart(AutostartCondition.SteamVR)
-		self.state["SteamVR"] = state
+		self.state["steamvr"] = state
 		self.syncState()
 
 logging.basicConfig(

@@ -1,5 +1,5 @@
 from vrcutil import __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH, IS_DEBUG
-from vrcutil.file import SafeOpen, SafeRead, EasySetting, BufferedJsonSaver
+from vrcutil.file import SafeOpen, EasySetting, BufferedJsonSaver
 import sys
 
 lockFile = SafeOpen(INSTALL_PATH/"VRCUtil.lock", "w", wait=False)
@@ -16,7 +16,6 @@ import importlib.util
 import traceback
 from pathlib import Path
 
-from pywebwinui3.util import loadPage
 from pywebwinui3.core import Status
 
 from vrcutil.core import VRCUtil, Module, logger
@@ -70,6 +69,10 @@ def settingDataInit(setting:dict):
     app.events.valueChange += ("system_theme", lambda k,_,v: settingSaver.save(k,v))
     app.events.valueChange += ("system_pin", lambda k,_,v: settingSaver.save(k,v))
     app.events.valueChange += ("settings_*", lambda k,_,v: settingSaver.save(k,v))
+    app.events.valueChange += ("settings_osc_address", initClient)
+    app.events.valueChange += ("settings_osc_send", initClient)
+    app.events.valueChange += ("settings_osc_address", initServer)
+    app.events.valueChange += ("settings_osc_receive", initServer)
 
     initClient()
     initServer(direct=True)
@@ -77,15 +80,11 @@ def settingDataInit(setting:dict):
     threading.Thread(target=loadModule, daemon=True).start()
     threading.Thread(target=checkUpdate, daemon=True).start()
 
-@app.onValueChange("settings_osc_address")
-@app.onValueChange("settings_osc_send")
 def initClient(*_):
     if (address:=app.values.get("settings_osc_address")) and (port:=app.values.get("settings_osc_send")):
         if not app.osc.client or app.osc.client._port!=port or app.osc.client._address!=address:
             app.osc._initClient(app.values["settings_osc_address"],int(app.values["settings_osc_send"]))
 
-@app.onValueChange("settings_osc_address")
-@app.onValueChange("settings_osc_receive")
 def initServer(*_, direct=False):
     if not direct:
         app.osc.ServerRecreateFlag = getattr(app.osc,'ServerRecreateFlag',0)+1

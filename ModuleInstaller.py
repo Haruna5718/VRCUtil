@@ -25,7 +25,7 @@ from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH
 modulePath = pathlib.Path(sys.argv[1])
 
 class MainWindow(tkinter.App):
-    def __init__(self, title:str, size:str, icon:str, resize:bool=True):
+    def __init__(self, title:str, size:list[int], icon:str, resize:bool=True):
         super().__init__(title, size, icon, resize)
 
         self.grid_columnconfigure(0, weight=1)
@@ -127,4 +127,4 @@ with zipfile.ZipFile(modulePath, 'r') as zip_ref:
     with zip_ref.open("module.json") as f:
         installData = json.load(f)
 
-        MainWindow(title="VRCUtil Module Installer", size="400x200", icon=INSTALL_PATH/"VRCUtil.ico").start()
+        MainWindow(title="VRCUtil Module Installer", size=[400,200], icon=INSTALL_PATH/"VRCUtil.ico").start()

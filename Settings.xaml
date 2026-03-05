@@ -14,13 +14,13 @@
         <Horizontal gap="10px">
             <Text> Auto start</Text>
             <Space />
-            <If data="{settings_autoStart!='0'}">
+            <!-- <If data="{settings_autoStart!='0'}">
 				<Check value="settings_startMinimized" align="left">Minimize</Check>
-			</If>
+			</If> -->
             <Select value="settings_autoStart">
                 <Option value="0"> Disable Auto start</Option>
                 <Option value="1"> Start with SteamVR</Option>
-                <Option value="2"> Start with VRChat</Option>
+                <!-- <Option value="2"> Start with VRChat</Option> -->
                 <Option value="3"> Start with System</Option>
             </Select>
         </Horizontal>
@@ -88,13 +88,13 @@
             <Switch value="settings_checkUpdate"/>
         </Horizontal>
     </Box>
-    <!-- <Box>
+    <Box>
         <Horizontal>
             <Text> Debug log</Text>
             <Space />
             <Button type="link" value="vrcutil_openLog">Open log</Button>
         </Horizontal>
-    </Box> -->
+    </Box>
     <Expender>
         <Header>
             <Horizontal>

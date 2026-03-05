@@ -33,9 +33,7 @@ binary = [
 module = []
 
 collectAllModule = [
-    "pip",
-    "customtkinter",
-    "pywebwinui3",
+    "PIL",
 ]
 
 #============================================
@@ -44,7 +42,7 @@ import sys
 import pathlib
 import shutil
 import threading
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT
 
 datas = []
@@ -100,9 +98,11 @@ def buildExe(info:dict):
     )
     datas+=[exe,a.binaries,a.datas]
 
+collectAllModule += open("requirements.txt").read().splitlines()
 collectAllModule += list(sys.stdlib_module_names)
 collectAllModule.remove("antigravity")
 collectAllModule.remove("this")
+collectAllModule.append("pip")
 
 runThreadWorks(collectAllModule, collect)
 

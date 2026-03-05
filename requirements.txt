@@ -1,0 +1,13 @@
+pywebwinui3
+python-osc
+pillow
+vdf
+customtkinter
+pystray
+zeroconf
+wmi
+PyOpenGL
+PyOpenGL-accelerate
+glfw
+numpy
+openvr

@@ -11,17 +11,16 @@ import pywebwinui3.core
 import pywebwinui3.util
 import pywebwinui3.type
 
-from . import file, osc, steam, __version__, INSTALL_PATH, DATA_PATH, MODULES_PATH
+from . import event, file, osc, overlay, registry, steam, wmi, __version__, INSTALL_PATH, DATA_PATH, MODULES_PATH
 
 logger = logging.getLogger("vrcutil")
 
 class VRCUtil(pywebwinui3.core.MainWindow):
     def __init__(self, title, icon):
         super().__init__(title, icon)
-        self.rootPath = INSTALL_PATH
         self.api._window.hidden = True
-        self.api.minimize = self.api._window.minimize
-        self.api.destroy = self.api._window.hide
+        # self.api.minimize = self.api._window.minimize
+        # self.api.destroy = self.api._window.hide
 
         self.osc = osc.EasyOSC(title, init=False)
 
@@ -37,58 +36,74 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         self.addSettings("Settings.xaml")
 
         self.values.set("vrcutil_version", __version__, False)
-        self.tray = VRCUtilTray(self, title, icon, start=True)
+        self.opengl = overlay.OpenGLManager()
+        # self.tray = VRCUtilTray(self, title, icon, start=True)
 
-    def serverRouteFile(self, filepath:str):
-        return bottle.static_file(filepath, root=DATA_PATH if (DATA_PATH/filepath).is_file() else self.rootPath)
+    def routeFile(self, filepath="index.html"):
+        if (self.packagePath/filepath).is_file():
+            return bottle.static_file(filepath, root=self.packagePath)
+        if (INSTALL_PATH/filepath).is_file():
+            return bottle.static_file(filepath, root=INSTALL_PATH)
+        if (DATA_PATH/filepath).is_file():
+            return bottle.static_file(filepath, root=DATA_PATH)
 
-    def syncProcessState(self):
-        data = bottle.request.json
-        logger.info(f"Sync state received: {data}")
-        for k, v in data.items():
-            self.values.set(f"{k}_state", bool(v))
+    # def syncProcessState(self):
+    #     data = bottle.request.json
+    #     logger.info(f"Sync state received: {data}")
+    #     for k, v in data.items():
+    #         if k=="steamvr":
+    #             if bool(v):
+    #                 logger.info("try to init openvr...")
+    #                 overlay.Manager.openvr()
+    #                 logger.info("openvr initialized")
+    #             else:
+    #                 logger.info("try to stop openvr...")
+    #                 overlay.Manager.stop()
+    #                 logger.info("openvr stopped")
+    #         self.values.set(f"{k}_state", bool(v))
 
     def start(self, debug=False, minimized=False, onTop=False):
         self.api._window.on_top = onTop
         self.api._window.hidden = minimized
 
-        self.server.post('/',callback=self.syncProcessState)
+        # self.server.post('/',callback=self.syncProcessState)
 
         super().start(debug)
 
-class VRCUtilTray(pystray.Icon):
-    def __init__(self, app:VRCUtil, title, icon, start=False):
-        self.app = app
-        super().__init__(
-            title,
-            PIL.Image.open(icon),
-            title,
-            pystray.Menu(
-                pystray.MenuItem("Open", self.open, default=True),
-                pystray.MenuItem("Exit", self.exit)
-            )
-        )
-        if start:
-            threading.Thread(target=self.start, daemon=True).start()
+# class VRCUtilTray(pystray.Icon):
+#     def __init__(self, app:VRCUtil, title, icon, start=False):
+#         self.app = app
+#         super().__init__(
+#             title,
+#             PIL.Image.open(icon),
+#             title,
+#             pystray.Menu(
+#                 pystray.MenuItem("Open", self.open, default=True),
+#                 pystray.MenuItem("Exit", self.exit)
+#             )
+#         )
+#         if start:
+#             threading.Thread(target=self.start, daemon=True).start()
 
-    def open(self):
-        self.app.api._window.show()
-        self.app.api._window.restore()
+#     def open(self):
+#         self.app.api._window.show()
+#         self.app.api._window.restore()
 
-    def exit(self):
-        self.stop()
-        self.app.api._window.destroy()
+#     def exit(self):
+#         self.stop()
+#         self.app.api._window.destroy()
     
-    def start(self):
-        self.run()
+#     def start(self):
+#         self.run()
 
 class Module:
     def __init__(self, app:VRCUtil):
         self.app = app
 
         self.__init_info__()
-        self.__init_event__()
-        self.__init_layout__()
+        threading.Thread(target=self.__init_event__, daemon=True).start()
+        threading.Thread(target=self.__init_layout__, daemon=True).start()
+        threading.Thread(target=self.__init_widget__, daemon=True).start()
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -121,6 +136,7 @@ class Module:
                 logger.error(f"Faild to load page: {layoutPath}\n{traceback.format_exc()}")
                 self.app.notice(pywebwinui3.type.Status.Caution, f"Faild to load page {self.__name__}", str(e))
 
+    def __init_widget__(self):
         if (widgetPath:=MODULES_PATH/self.__path__/"Widget.xaml").exists():
             try:
                 self.__widget__ = pywebwinui3.util.loadPage(widgetPath)
@@ -131,12 +147,15 @@ class Module:
 
 class EasyModule(Module):
     def __init__(self, app:VRCUtil, load:dict[str]=None, init:dict[str]=None, save:list[str]=None):
-        super().__init__(app)
+        self.app = app
 
         if load:
             self.__init_value_load__(load)
         if init:
             self.__init_value_init__(init)
+
+        super().__init__(app)
+
         if save:
             self._valueSaver = file.BufferedJsonSaver(DATA_PATH/MODULES_PATH.name/self.__path__/"Setting.json")
             self.__init_value_save__(save)

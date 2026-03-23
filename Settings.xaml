@@ -14,20 +14,16 @@
         <Horizontal gap="10px">
             <Text> Auto start</Text>
             <Space />
-            <!-- <If data="{settings_autoStart!='0'}">
-				<Check value="settings_startMinimized" align="left">Minimize</Check>
-			</If> -->
             <Select value="settings_autoStart">
                 <Option value="0"> Disable Auto start</Option>
                 <Option value="1"> Start with SteamVR</Option>
-                <!-- <Option value="2"> Start with VRChat</Option> -->
                 <Option value="3"> Start with System</Option>
             </Select>
         </Horizontal>
     </Box>
     <Box>
         <Horizontal>
-            <Text> OSC config</Text>
+            <Text> OSC</Text>
             <Space />
             <Vertical gap="0" align="left">
                 <Text type="description">Address</Text>
@@ -63,10 +59,6 @@
                             <Text type="description">{vrcutil_modules[{i}][3]}</Text>
                         </Vertical>
                         <Space />
-                        <!-- <Repeat data="{vrcutil_modules[{i}][4]}">
-                            <Button type="link" url="vrcutil_modules[{i}][4]"></Button>
-                        </Repeat> -->
-                        <!-- <Switch value="vrcutil_module_toggle_{vrcutil_modules[{i}][0]}" on="Enable" off="Disable"/> -->
                         <Button value="vrcutil_removeModule_{vrcutil_modules[{i}][0]}">Remove</Button>
                     </Horizontal>
                 </Box>
@@ -109,12 +101,6 @@
                 <Button type="link" url="https://discord.gg/MCVkS9ZUpF">Discord</Button>
             </Horizontal>
         </Header>
-        <!-- <Content>
-            <Horizontal>
-                <Text>Support</Text>
-                <Space />
-            </Horizontal>
-        </Content> -->
         <Content align="left">
             <Text type="description">
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -138,9 +124,7 @@ limitations under the License.
                 <Text type="description"></Text>
                 <Text type="description" url="https://github.com/pyinstaller/pyinstaller">PyInstaller </Text>
                 <Text type="description"></Text>
-                <Text type="description" url="https://pywebview.flowrl.com/">pywebview </Text>
-                <Text type="description"></Text>
-                <Text type="description" url="https://github.com/moses-palmer/pystray">pystray </Text>
+                <Text type="description" url="https://wiki.qt.io/Qt_for_Python">pyside6 </Text>
                 <Text type="description"></Text>
                 <Text type="description" url="https://customtkinter.tomschimansky.com/">CustomTkinter </Text>
                 <Text type="description"></Text>

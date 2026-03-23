@@ -1,11 +1,11 @@
+PySide6
+pywin32
 pywebwinui3
 python-osc
 pillow
 vdf
 customtkinter
-pystray
 zeroconf
-wmi
 PyOpenGL
 PyOpenGL-accelerate
 glfw

@@ -1,14 +1,19 @@
-splash = "Splash.png"
+
 target = {
-    "name": "VRCUtil-Installer",
-    "file": "Installer.py",
-    "icon": "VRCUtil.ico"
+    "name":"Uninstall",
+    "file":"Uninstaller.py",
+    "icon":"VRCUtil.ico",
 }
 file = [
     ('.venv/Lib/site-packages/customtkinter/assets', 'customtkinter/assets'),
-    ('dist/VRCUtil', 'data'),
     ('VRCUtil.ico', '.')
 ]
+
+#============================================
+
+import pathlib
+import shutil
+from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT
 
 a = Analysis(
     [target['file']],
@@ -23,16 +28,6 @@ a = Analysis(
     noarchive=False,
 )
 
-img = Splash(
-    splash,
-    binaries=a.binaries,
-    datas=a.datas,
-    text_pos=None,
-    text_size=12,
-    minify_script=True,
-    always_on_top=True,
-)
-
 exe = EXE(
     PYZ(
         a.pure,
@@ -42,8 +37,6 @@ exe = EXE(
     a.scripts,
     a.binaries,
     a.datas,
-    img,
-    img.binaries,
     [],
     name=target['name'],
     icon=[target['icon']],
@@ -60,3 +53,11 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+distPath = pathlib.Path(DISTPATH)
+sourcePath = distPath / f"{target['name']}.exe"
+targetPath = distPath / "VRCUtil" / f"{target['name']}.exe"
+targetPath.parent.mkdir(parents=True, exist_ok=True)
+if targetPath.exists():
+    targetPath.unlink()
+shutil.move(str(sourcePath), str(targetPath))

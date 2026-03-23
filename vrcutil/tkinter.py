@@ -152,48 +152,51 @@ class Button(customtkinter.CTkButton):
         [
             None,
             None,
-            ColorPalette.TextOnAccentFillColorPrimary
         ],
         [
             ColorPalette.SystemFillColorSuccess,
             ColorPalette.SystemFillColorSuccess,
-            ColorPalette.TextOnAccentFillColorPrimary
         ],
         [
             ColorPalette.SystemFillColorCaution,
             ColorPalette.SystemFillColorCaution,
-            ColorPalette.TextOnAccentFillColorPrimary
         ],
         [
             ColorPalette.SystemFillColorCritical,
             ColorPalette.SystemFillColorCritical,
-            ColorPalette.TextOnAccentFillColorPrimary
         ],
         [
             ColorPalette.ControlFillColorDefault,
             ColorPalette.ControlFillColorSecondary,
-            ColorPalette.TextOnAccentFillColorPrimary
         ]
     ]
-    def __init__(self, master:customtkinter.CTk, acm:AccentColorManager, text:str, callback=None, color:Status=Status.Neutral, **kwargs):
+    def __init__(self, master:customtkinter.CTk, acm:AccentColorManager, text:str, callback=None, color:Status=Status.Neutral, enable:bool=True, **kwargs):
         self.acm = acm
-        self.color = color
+        self.color = None
         self.callback = callback
-        self.enable = True
-        super().__init__(master, text=text, command=self.onClick, text_color=self.ColorSet[self.color][2], **kwargs)
-        
-        if self.color == Status.Attention:
-            self.acm.append(self)
-        else:
-            self.configure(fg_color=self.ColorSet[self.color][0], hover_color=self.ColorSet[self.color][1])
+        self.enable = enable
+        super().__init__(master, command=self.onClick, text_color=ColorPalette.TextOnAccentFillColorPrimary, **kwargs)
+        self.config(self.enable, text, color)
 
     def onClick(self):
         if self.callback:
             self.callback(self)
 
-    def config(self, enable:bool, text=None):
-        self.enable = enable
-        self.configure(text=text or self._text, state="normal" if enable else "disabled", fg_color=(self.ColorSet[self.color][0] or self.acm.accentPalette.AccentFillColorDefault) if enable else ColorPalette.ControlFillColorDisabled)
+    def config(self, enable:bool=None, text=None, color:Status=None):
+        if enable != None:
+            self.enable = enable
+        if color != None and self.color != color:
+            if color == Status.Attention:
+                self.acm.append(self)
+            if self.color == Status.Attention:
+                self.acm.remove(self)
+            self.color = color
+        self.configure(
+            text=text or self._text,
+            state="normal" if enable else "disabled",
+            fg_color=(self.ColorSet[self.color][0] or self.acm.accentPalette.AccentFillColorDefault) if enable else ColorPalette.ControlFillColorDisabled,
+            hover_color=(self.ColorSet[self.color][1] or self.acm.accentPalette.AccentFillColorSecondary),
+        )
 
     def onAccentChange(self):
         if self.color == Status.Attention and self.enable:
@@ -208,17 +211,20 @@ class ProgressBar(customtkinter.CTkProgressBar):
         None
     ]
     def __init__(self, master:customtkinter.CTk, acm:AccentColorManager, state:Status=Status.Attention, **kwargs):
-        self.acm = acm
         super().__init__(master, **kwargs)
+        self.acm = acm
+        self.state = None
         self.config(state)
         self.set(0)
 
     def config(self, state:Status):
-        self.state = state
-        if self.state == Status.Attention:
-            self.acm.append(self)
-        else:
-            self.configure(progress_color=self.ColorSet[self.state])
+        if self.state != state:
+            if state == Status.Attention:
+                self.acm.append(self)
+            if self.state == Status.Attention:
+                self.acm.remove(self)
+            self.state = state
+            self.configure(progress_color=self.ColorSet[self.state] or self.acm.accentPalette.AccentFillColorDefault)
 
     def onAccentChange(self):
         if self.state==Status.Attention:

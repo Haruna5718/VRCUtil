@@ -16,6 +16,7 @@ import subprocess
 import webbrowser
 import customtkinter
 from PIL import Image
+from win32com.client import Dispatch
 
 from pywebwinui3.type import Status
 
@@ -25,16 +26,48 @@ rootPath = pathlib.Path("./" if IS_DEBUG else sys._MEIPASS)
 
 def createShortcut(target:str|pathlib.Path,outPath:str|pathlib.Path):
     target = pathlib.Path(target).resolve()
-    subprocess.run((
-        f'powershell "$s=(New-Object -COM WScript.Shell).CreateShortcut(\\"{pathlib.Path(outPath).resolve()}\\");'
-        f'$s.TargetPath=\\"{target}\\";'
-        f'$s.WorkingDirectory=\\"{target.parent}\\";'
-        f'$s.IconLocation=\\"{target}\\";'
-        '$s.Save()"'
-    ), shell=True, check=True)
+    outPath = pathlib.Path(outPath).resolve()
+    outPath.parent.mkdir(parents=True, exist_ok=True)
+    shell = Dispatch("WScript.Shell")
+    shortcut = shell.CreateShortcut(str(outPath))
+    shortcut.TargetPath = str(target)
+    shortcut.WorkingDirectory = str(target.parent)
+    shortcut.IconLocation = str(target)
+    shortcut.Save()
+
+def processExists(imageName:str) -> bool:
+    flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+    result = subprocess.run(
+        ["tasklist", "/FI", f"IMAGENAME eq {imageName}", "/FO", "CSV", "/NH"],
+        capture_output=True,
+        text=True,
+        creationflags=flags,
+    )
+    if result.returncode != 0:
+        return False
+    return imageName.casefold() in result.stdout.casefold()
+
+def closeRunningVRCUtil() -> tuple[bool, bool]:
+    imageName = "VRCUtil.exe"
+    if not processExists(imageName):
+        return False, False
+
+    flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+    for command, forced in (
+        (["taskkill", "/IM", imageName, "/T"], False),
+        (["taskkill", "/IM", imageName, "/T", "/F"], True),
+    ):
+        result = subprocess.run(command, capture_output=True, text=True, creationflags=flags)
+        if result.returncode == 0:
+            return True, forced
+
+    if not processExists(imageName):
+        return False, False
+    output = f"{result.stdout}\n{result.stderr}".strip() if 'result' in locals() else ""
+    raise RuntimeError(output or "Failed to close VRCUtil.exe before installation.")
 
 class MainWindow(tkinter.App):
-    def __init__(self, title:str, size:list[int], icon:str, resize:bool=True):
+    def __init__(self, title:str, size:list[int], icon: str|pathlib.Path, resize:bool=True):
         super().__init__(title, size, icon, resize)
 
         self.grid_columnconfigure(0, weight=1)
@@ -42,12 +75,11 @@ class MainWindow(tkinter.App):
 
         self.installPath = pathlib.Path(os.environ["LOCALAPPDATA"])/"Programs/VRCUtil"
 
-        self.page = WelcomPage(self, self.acm)
+        self.page = WelcomPage(self, self.acm, icon)
         self.page.grid(row=0, sticky="snew")
 
         self.autoLaunch = tkinter.CheckBox(self, self.acm, text="Launch VRCUtil after installed")
         self.autoLaunch.grid(row=1, padx=20, pady=20, sticky="w")
-
 
         tkinter.Button(self, self.acm, text="Install", color=Status.Attention, callback=self.install).grid(row=1, padx=20, pady=20, sticky="e")
 
@@ -59,13 +91,13 @@ class MainWindow(tkinter.App):
         self.page.grid(row=0, sticky="snew")
 
 class WelcomPage(tkinter.Page):
-    def __init__(self, master:MainWindow, acm):
+    def __init__(self, master:MainWindow, acm, icon: str|pathlib.Path):
         super().__init__(master, acm)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
 
-        customtkinter.CTkLabel(self, image=customtkinter.CTkImage(light_image=Image.open(rootPath/"VRCUtil.ico"),size=(84, 84)), text="").grid(row=0, padx=20, pady=20, sticky="ne", rowspan=3)
+        customtkinter.CTkLabel(self, image=customtkinter.CTkImage(light_image=Image.open(icon), size=(84, 84)), text="").grid(row=0, padx=20, pady=20, sticky="ne", rowspan=3)
 
         customtkinter.CTkLabel(self, text="VRCUtil", font=customtkinter.CTkFont(size=24, weight="bold")).grid(row=0, padx=20, pady=(20,0), sticky="nw")
         customtkinter.CTkLabel(self, text=f"Version: {__version__}").grid(row=1, padx=23, pady=(0, 28), sticky="nw")
@@ -104,72 +136,69 @@ class InstallPage(tkinter.Page):
     def install(self):
         try:
             self.installLog.write(f"Install path: {self.master.installPath}")
+            
+            closed, forced = closeRunningVRCUtil()
+            if closed:
+                self.installLog.write("\nClosed running VRCUtil" + (" (forced)" if forced else ""))
+
             sourcePath = rootPath/"data"
-            totalProgress = sum([len(files) for _, _, files in os.walk(sourcePath)])+6
+            files = [path for path in sourcePath.rglob("*") if path.is_file()]
+            totalProgress = len(files) + 4
             currentProgress = 0
 
-            for filePath, _, fileNames in os.walk(sourcePath):
-                filePath = pathlib.Path(filePath)
-                realPath = filePath.relative_to(sourcePath)
-                targetPath = self.master.installPath/realPath
-                targetPath.mkdir(parents=True,exist_ok=True)
-                for filename in fileNames:
-                    self.installLog.write(f"\nExtract: {realPath/filename}")
-                    shutil.copy(filePath/filename, targetPath/filename)
-                    currentProgress += 1
-                    self.progress.set(currentProgress/totalProgress)
+            for sourceFile in files:
+                realPath = sourceFile.relative_to(sourcePath)
+                targetFile = self.master.installPath/realPath
+                self.installLog.write(f"\nExtract: {realPath}")
+                if not IS_DEBUG:
+                    targetFile.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(sourceFile, targetFile)
 
-            registry.Program.install(
-                id = "VRCUtil",
-                name = "VRCUtil",
-                icon = self.master.installPath/"VRCUtil.exe",
-                version = __version__,
-                author = "Haruna5718",
-                uninstaller = self.master.installPath/"Uninstall.exe",
-                installDir = self.master.installPath,
-                installDate = datetime.datetime.now()
-            )
+                currentProgress += 1
+                self.progress.set(currentProgress/totalProgress)
+
+            if not IS_DEBUG:
+                registry.Program.install(
+                    id = "VRCUtil",
+                    name = "VRCUtil",
+                    icon = self.master.installPath/"VRCUtil.exe",
+                    version = __version__,
+                    author = "Haruna5718",
+                    uninstaller = self.master.installPath/"Uninstall.exe",
+                    installDir = self.master.installPath,
+                    installDate = datetime.datetime.now()
+                )
             currentProgress += 1
             self.progress.set(currentProgress/totalProgress)
-            self.installLog.write("\nRegistry configured: Software\\Microsoft\\\Windows\\CurrentVersion\\Uninstall\\VRCUtil")
+            self.installLog.write("\nRegistry configured: Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VRCUtil")
 
-            registry.ExtConnector.connect(
-                id = "VRCUtilModuleFile",
-                ext = "vrcutilmodule",
-                target = self.master.installPath/"ModuleInstaller.exe",
-                description = "VRCUtil Module File",
-                icon = self.master.installPath/"ModuleInstaller.exe"
-            )
+            if not IS_DEBUG:
+                registry.ExtConnector.connect(
+                    id = "VRCUtilModuleFile",
+                    ext = "vrcutilmodule",
+                    target = self.master.installPath/"ModuleInstaller.exe",
+                    description = "VRCUtil Module File",
+                    icon = self.master.installPath/"ModuleInstaller.exe"
+                )
             currentProgress += 1
             self.progress.set(currentProgress/totalProgress)
             self.installLog.write(f"\next connected: .vrcutilmodule > {self.master.installPath/'ModuleInstaller.exe'}")
 
-            registry.Program.setAutostart(
-                name = "VRCUtil Service Worker",
-                path = self.master.installPath/"ServiceWorker.exe"
-            )
-            currentProgress += 1
-            self.progress.set(currentProgress/totalProgress)
-            self.installLog.write(f"\nStartup program registed: {self.master.installPath/'ServiceWorker.exe'}")
-
-            subprocess.Popen([self.master.installPath/"ServiceWorker.exe"], cwd=self.master.installPath)
-            currentProgress += 1
-            self.progress.set(currentProgress/totalProgress)
-            self.installLog.write(f"\nServiceWorker launched")
-
-            createShortcut(self.master.installPath/"VRCUtil.exe",pathlib.Path(os.environ["APPDATA"])/"Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk")
+            if not IS_DEBUG:
+                createShortcut(self.master.installPath/"VRCUtil.exe",pathlib.Path(os.environ["APPDATA"])/"Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk")
             currentProgress += 1
             self.progress.set(currentProgress/totalProgress)
             self.installLog.write(f"\nStart menu shortcut created: VRCUtil.lnk")
 
-            createShortcut(self.master.installPath/"VRCUtil.exe",pathlib.Path(os.environ["USERPROFILE"])/"Desktop/VRCUtil.lnk")
+            if not IS_DEBUG:
+                createShortcut(self.master.installPath/"VRCUtil.exe",pathlib.Path(os.environ["USERPROFILE"])/"Desktop/VRCUtil.lnk")
             currentProgress += 1
             self.progress.set(currentProgress/totalProgress)
             self.installLog.write(f"\nDesktop shortcut created: VRCUtil.lnk")
 
             self.message.configure(text=f'Installed VRCUtil {__version__}')
             
-            if self.master.autoLaunch.value:
+            if self.master.autoLaunch.value and not IS_DEBUG:
                 subprocess.Popen([self.master.installPath/"VRCUtil.exe"], cwd=self.master.installPath)
                 self.master.autoLaunch.configure(state="disabled")
             else:
@@ -186,7 +215,7 @@ class InstallPage(tkinter.Page):
             self.button.callback=lambda _: sys.exit(1)
 
     def close(self, _):
-        if self.master.autoLaunch.value:
+        if self.master.autoLaunch.value and not IS_DEBUG:
             subprocess.Popen([self.master.installPath/"VRCUtil.exe"], cwd=self.master.installPath)
         sys.exit(0)
 

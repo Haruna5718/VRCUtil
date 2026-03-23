@@ -12,3 +12,5 @@ Setting.json
 
 pyinstaller/
 upx.exe
+
+.vscode/

@@ -30,7 +30,7 @@ def delete(target:targetType, path:str, name:str=None):
                 winreg.DeleteValue(key, name)
             else:
                 for i in range(winreg.QueryInfoKey(key)[0] - 1, -1, -1):
-                    delete(fr"{path}\{winreg.EnumKey(key, i)}")
+                    delete(target, fr"{path}\{winreg.EnumKey(key, i)}")
         winreg.DeleteKeyEx(target, path)
     except FileNotFoundError:
         pass

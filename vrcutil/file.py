@@ -133,25 +133,34 @@ class BufferedJsonSaver:
 		self._saveTimer = None
 		self._bufferTime = 1
 		self._saveBuffer:dict[str] = {}
+		self._lock = threading.Lock()
 
 	def save(self, key, value):
-		self._saveBuffer[key] = value
-		self._saveSchedule()
+		with self._lock:
+			self._saveBuffer[key] = value
+			self._saveSchedule()
 
 	def _saveSchedule(self):
 		if self._saveTimer and self._saveTimer.is_alive():
 			return
 		self._saveTimer = threading.Timer(self._bufferTime, self._saveData)
+		self._saveTimer.daemon = True
 		self._saveTimer.start()
 
 	def _saveData(self):
+		with self._lock:
+			pending = dict(self._saveBuffer)
+
+		if not pending:
+			return
+
 		with SafeOpen(self.path, "r+", touch=True) as f:
 			try:
 				data = json.load(f)
-				changed = {k: v for k, v in self._saveBuffer.items() if data.get(k) != v}
+				changed = {k: v for k, v in pending.items() if data.get(k) != v}
 			except:
 				data = {}
-				changed = self._saveBuffer
+				changed = pending
 
 			if changed:
 				data.update(changed)
@@ -159,4 +168,10 @@ class BufferedJsonSaver:
 				f.truncate()
 				json.dump(data, f, ensure_ascii=False, indent=4)
 
-		self._saveBuffer.clear()
+		with self._lock:
+			for key, value in pending.items():
+				if self._saveBuffer.get(key) == value:
+					self._saveBuffer.pop(key, None)
+			self._saveTimer = None
+			if self._saveBuffer:
+				self._saveSchedule()

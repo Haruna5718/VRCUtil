@@ -4,17 +4,28 @@ import ctypes
 import enum
 import numpy as np
 from queue import Queue
-from OpenGL.GL import glDeleteTextures, glGenTextures, glBindTexture, glTexParameteri, glTexImage2D, glTexSubImage2D, glFlush, GL_TEXTURE_2D, GL_LINEAR, GL_CLAMP_TO_EDGE, GL_RGBA, GL_UNSIGNED_BYTE, GL_TEXTURE_MIN_FILTER, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T
+from OpenGL.GL import glGenTextures, glBindTexture, glTexParameteri, glTexImage2D, glTexSubImage2D, GL_TEXTURE_2D, GL_LINEAR, GL_CLAMP_TO_EDGE, GL_RGBA, GL_UNSIGNED_BYTE, GL_TEXTURE_MIN_FILTER, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T
 import glfw
 import threading
 
 class OpenGLManager:
     def __init__(self):
         self.queue = Queue()
-        self.thread = threading.Thread(target=self._init, daemon=True)
-        self.thread.start()
-
+        self.thread = None
+        self._started = False
+        self._start_lock = threading.Lock()
         self.cache:dict[tuple[int,int],int] = {}
+
+    def _ensure_started(self):
+        if self._started:
+            return
+
+        with self._start_lock:
+            if self._started:
+                return
+            self.thread = threading.Thread(target=self._init, daemon=True)
+            self.thread.start()
+            self._started = True
 
     def _init(self):
         glfw.init()
@@ -56,6 +67,7 @@ class OpenGLManager:
         overlay.setOverlayTexture(overlay_handle, texture)
 
     def submit(self, image, overlay:openvr.IVROverlay, overlay_handle:int, name:str="Default"):
+        self._ensure_started()
         self.queue.put((name, image, overlay, overlay_handle))
 
 class Manager():

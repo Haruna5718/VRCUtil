@@ -3,6 +3,7 @@ import winreg
 import pathlib
 import datetime
 import logging
+import os
 
 logger = logging.getLogger("vrcutil.registry")
 
@@ -58,6 +59,55 @@ class ExtConnector:
 
 class Program:
     @staticmethod
+    def startupShortcutApprovedPath() -> str:
+        return r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+
+    @staticmethod
+    def autostartApprovedPath() -> str:
+        return r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+
+    @staticmethod
+    def startupShortcutPath(name:str) -> pathlib.Path:
+        return pathlib.Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Startup" / f"{name}.lnk"
+
+    @staticmethod
+    def startupShortcutValueName(name:str) -> str:
+        return Program.startupShortcutPath(name).name
+
+    @staticmethod
+    def startupApprovedValue(state:bool) -> bytes:
+        if state:
+            return bytes([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+        epoch = datetime.datetime(1601, 1, 1, tzinfo=datetime.UTC)
+        now = datetime.datetime.now(datetime.UTC)
+        filetime = int((now - epoch).total_seconds() * 10_000_000)
+        return bytes([3, 0, 0, 0]) + filetime.to_bytes(8, "little", signed=False)
+
+    @staticmethod
+    def setStartupApproved(path:str, name:str, state:bool):
+        create(targetType.currentUser, path, name, valueType.bytes, Program.startupApprovedValue(state))
+
+    @staticmethod
+    def unsetStartupApproved(path:str, name:str):
+        delete(targetType.currentUser, path, name)
+
+    @staticmethod
+    def startupApprovedState(path:str, name:str) -> bool|None:
+        try:
+            value = read(targetType.currentUser, path, name)[0]
+        except FileNotFoundError:
+            return None
+
+        if not value:
+            return None
+        if value[0] == 2:
+            return True
+        if value[0] == 3:
+            return False
+        return None
+
+    @staticmethod
     def install(id:str, name:str, uninstaller:str|pathlib.Path, version:str=None, author:str=None, installDir:str|pathlib.Path=None, installDate:datetime.datetime=None, icon:str=None, modifier:str|pathlib.Path=None, canModify:bool=False, canRepair:bool=False):
         path = fr"Software\Microsoft\Windows\CurrentVersion\Uninstall\{id}"
 
@@ -90,6 +140,57 @@ class Program:
     def unsetAutostart(name:str):
         delete(targetType.currentUser, r"Software\Microsoft\Windows\CurrentVersion\Run", name)
         logger.info(f"Autostart unregisted: {name}")
+
+    @staticmethod
+    def autostartState(name:str) -> bool|None:
+        return Program.startupApprovedState(Program.autostartApprovedPath(), name)
+
+    @staticmethod
+    def unsetAutostartState(name:str):
+        Program.unsetStartupApproved(Program.autostartApprovedPath(), name)
+        logger.info(f"Autostart startup-approved state removed: {name}")
+
+    @staticmethod
+    def setStartupShortcut(name:str, target:str|pathlib.Path, arguments:str="", icon:str|pathlib.Path=None):
+        import pythoncom
+        from win32com.client import Dispatch
+
+        target = pathlib.Path(target).resolve()
+        shortcut_path = Program.startupShortcutPath(name)
+        shortcut_path.parent.mkdir(parents=True, exist_ok=True)
+
+        pythoncom.CoInitialize()
+        try:
+            shell = Dispatch("WScript.Shell")
+            shortcut = shell.CreateShortcut(str(shortcut_path))
+            shortcut.TargetPath = str(target)
+            shortcut.Arguments = str(arguments or "")
+            shortcut.WorkingDirectory = str(target.parent)
+            shortcut.IconLocation = str(icon or target)
+            shortcut.Save()
+        finally:
+            pythoncom.CoUninitialize()
+
+        logger.info(f"Startup shortcut registed: {name} {target} {arguments}")
+
+    @staticmethod
+    def unsetStartupShortcut(name:str):
+        Program.startupShortcutPath(name).unlink(missing_ok=True)
+        logger.info(f"Startup shortcut unregisted: {name}")
+
+    @staticmethod
+    def startupShortcutState(name:str) -> bool|None:
+        return Program.startupApprovedState(Program.startupShortcutApprovedPath(), Program.startupShortcutValueName(name))
+
+    @staticmethod
+    def setStartupShortcutState(name:str, state:bool):
+        Program.setStartupApproved(Program.startupShortcutApprovedPath(), Program.startupShortcutValueName(name), state)
+        logger.info(f"Startup shortcut state setted: {name} {state}")
+
+    @staticmethod
+    def unsetStartupShortcutState(name:str):
+        Program.unsetStartupApproved(Program.startupShortcutApprovedPath(), Program.startupShortcutValueName(name))
+        logger.info(f"Startup shortcut startup-approved state removed: {name}")
 
     @staticmethod
     def uninstall(id:str):

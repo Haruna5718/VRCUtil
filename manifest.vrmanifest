@@ -4,7 +4,7 @@
 		"app_key": "Haruna5718.VRCUtil",
 		"launch_type": "binary",
 		"binary_path_windows": "VRCUtil.exe",
-		"is_dashboard_overlay": true,
+		"is_dashboard_overlay": false,
 
 		"strings": {
 			"en_us": {

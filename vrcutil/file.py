@@ -20,6 +20,7 @@ class SafeOpen:
 			self.path.parent.mkdir(parents=True, exist_ok=True)
 			self.path.touch()
 		while True:
+			f = None
 			try:
 				f = open(self.path, self.mode, encoding=self.encoding)
 				msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
@@ -36,6 +37,8 @@ class SafeOpen:
 					return None
 
 	def close(self):
+		if self.file is None:
+			return
 		self.file.flush()
 		self.file.seek(0)
 		try:
@@ -137,6 +140,8 @@ class BufferedJsonSaver:
 
 	def save(self, key, value):
 		with self._lock:
+			if self._saveBuffer.get(key) == value and self._saveTimer and self._saveTimer.is_alive():
+				return
 			self._saveBuffer[key] = value
 			self._saveSchedule()
 

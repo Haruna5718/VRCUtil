@@ -1,4 +1,5 @@
 import sys
+import ctypes
 
 if "debug" in sys.argv:
 	import ctypes
@@ -8,40 +9,50 @@ if "debug" in sys.argv:
 	sys.stdin  = open("CONIN$", "r")
 
 import os
+import time
 import shutil
-import pathlib
+import tempfile
 import datetime
 import threading
 import subprocess
 import webbrowser
+import tarfile
+import zstandard as zstd
+from pathlib import Path
 import customtkinter
+import pythoncom
 from PIL import Image
 from win32com.client import Dispatch
 
 from pywebwinui3.type import Status
 
-from vrcutil import registry, __version__, IS_DEBUG, tkinter
+from vrcutil import registry, steam, __version__, IS_DEBUG, tkinter
 
-rootPath = pathlib.Path("./" if IS_DEBUG else sys._MEIPASS)
+if IS_DEBUG:
+    rootPath = Path("./")
+rootPath = Path(__file__).resolve().parent
 
-def createShortcut(target:str|pathlib.Path,outPath:str|pathlib.Path):
-    target = pathlib.Path(target).resolve()
-    outPath = pathlib.Path(outPath).resolve()
+def createShortcut(target:str|Path,outPath:str|Path):
+    target = Path(target).resolve()
+    outPath = Path(outPath).resolve()
     outPath.parent.mkdir(parents=True, exist_ok=True)
-    shell = Dispatch("WScript.Shell")
-    shortcut = shell.CreateShortcut(str(outPath))
-    shortcut.TargetPath = str(target)
-    shortcut.WorkingDirectory = str(target.parent)
-    shortcut.IconLocation = str(target)
-    shortcut.Save()
+    pythoncom.CoInitialize()
+    try:
+        shell = Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortcut(str(outPath))
+        shortcut.TargetPath = str(target)
+        shortcut.WorkingDirectory = str(target.parent)
+        shortcut.IconLocation = str(target)
+        shortcut.Save()
+    finally:
+        pythoncom.CoUninitialize()
 
 def processExists(imageName:str) -> bool:
-    flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
     result = subprocess.run(
         ["tasklist", "/FI", f"IMAGENAME eq {imageName}", "/FO", "CSV", "/NH"],
         capture_output=True,
         text=True,
-        creationflags=flags,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     if result.returncode != 0:
         return False
@@ -52,12 +63,11 @@ def closeRunningVRCUtil() -> tuple[bool, bool]:
     if not processExists(imageName):
         return False, False
 
-    flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
     for command, forced in (
         (["taskkill", "/IM", imageName, "/T"], False),
         (["taskkill", "/IM", imageName, "/T", "/F"], True),
     ):
-        result = subprocess.run(command, capture_output=True, text=True, creationflags=flags)
+        result = subprocess.run(command, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
         if result.returncode == 0:
             return True, forced
 
@@ -67,13 +77,13 @@ def closeRunningVRCUtil() -> tuple[bool, bool]:
     raise RuntimeError(output or "Failed to close VRCUtil.exe before installation.")
 
 class MainWindow(tkinter.App):
-    def __init__(self, title:str, size:list[int], icon: str|pathlib.Path, resize:bool=True):
+    def __init__(self, title:str, size:list[int], icon: str|Path, resize:bool=True):
         super().__init__(title, size, icon, resize)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.installPath = pathlib.Path(os.environ["LOCALAPPDATA"])/"Programs/VRCUtil"
+        self.installPath = Path(os.environ["LOCALAPPDATA"])/"Programs/VRCUtil"
 
         self.page = WelcomPage(self, self.acm, icon)
         self.page.grid(row=0, sticky="snew")
@@ -83,15 +93,29 @@ class MainWindow(tkinter.App):
 
         tkinter.Button(self, self.acm, text="Install", color=Status.Attention, callback=self.install).grid(row=1, padx=20, pady=20, sticky="e")
 
+    def setClosable(self, state:bool):
+        self.after(0, lambda: self._setClosable(state))
+
+    def _setClosable(self, state:bool):
+        hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+        if state:
+            ctypes.windll.user32.GetSystemMenu(hwnd, True)
+        else:
+            menu = ctypes.windll.user32.GetSystemMenu(hwnd, False)
+            if menu:
+                ctypes.windll.user32.RemoveMenu(menu, 0xF060, 0x00000000)
+        ctypes.windll.user32.DrawMenuBar(hwnd)
+
     def install(self, target:tkinter.Button):
-        self.installPath = pathlib.Path(self.page.installPath.read())
+        self.installPath = Path(self.page.installPath.read())
         self.page.destroy()
         target.config(False,"Installing")
+        self.setClosable(False)
         self.page = InstallPage(self, self.acm, target)
         self.page.grid(row=0, sticky="snew")
 
 class WelcomPage(tkinter.Page):
-    def __init__(self, master:MainWindow, acm, icon: str|pathlib.Path):
+    def __init__(self, master:MainWindow, acm, icon: str|Path):
         super().__init__(master, acm)
 
         self.grid_columnconfigure(0, weight=1)
@@ -133,29 +157,110 @@ class InstallPage(tkinter.Page):
 
         threading.Thread(target=self.install,daemon=True).start()
 
+    def logWithProgress(self,message:str):
+        self.currentProgress += 1
+        self.installLog.write(message)
+        self.progress.set(self.currentProgress/self.totalProgress)
+
+
     def install(self):
+        stagePath = None
+        backupPath = None
+        installSwapped = False
+        steamvrRegistered = False
+        createdFreshInstall = not self.master.installPath.exists()
         try:
             self.installLog.write(f"Install path: {self.master.installPath}")
+            steamvrInstalled = (not IS_DEBUG and steam.hasSteamVR())
             
             closed, forced = closeRunningVRCUtil()
             if closed:
                 self.installLog.write("\nClosed running VRCUtil" + (" (forced)" if forced else ""))
 
-            sourcePath = rootPath/"data"
-            files = [path for path in sourcePath.rglob("*") if path.is_file()]
-            totalProgress = len(files) + 4
-            currentProgress = 0
+            self.sourceArchive = rootPath / "VRCUtil.tar.zst"
 
-            for sourceFile in files:
-                realPath = sourceFile.relative_to(sourcePath)
-                targetFile = self.master.installPath/realPath
-                self.installLog.write(f"\nExtract: {realPath}")
-                if not IS_DEBUG:
-                    targetFile.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(sourceFile, targetFile)
+            with self.sourceArchive.open("rb") as f:
+                dctx = zstd.ZstdDecompressor()
+                with dctx.stream_reader(f) as reader:
+                    with tarfile.open(fileobj=reader, mode="r|") as tar:
+                        archiveInfos = [m for m in tar if m.isfile()]
 
-                currentProgress += 1
-                self.progress.set(currentProgress/totalProgress)
+            self.totalProgress = len(archiveInfos) + 6 + int(steamvrInstalled)
+            self.currentProgress = 0
+
+            stagePath = Path(tempfile.mkdtemp(prefix="VRCUtil-Install-"))/"VRCUtil"
+            stagePath.mkdir(parents=True, exist_ok=True)
+
+            with self.sourceArchive.open("rb") as f:
+                dctx = zstd.ZstdDecompressor()
+                with dctx.stream_reader(f) as reader:
+                    with tarfile.open(fileobj=reader, mode="r|") as tar:
+                        logs = []
+                        last_update = -1
+
+                        for member in tar:
+                            if not member.isfile():
+                                continue
+
+                            logs.append(f"Extract: {member.name}")
+                            self.currentProgress += 1
+
+                            if (now:=time.monotonic()) - last_update >= 0.1:
+                                if logs:
+                                    self.progress.set(self.currentProgress / self.totalProgress)
+                                    self.installLog.write("\n" + "\n".join(logs))
+                                    logs.clear()
+                                last_update = now
+                            if not IS_DEBUG:
+                                tar.extract(member, stagePath)
+
+                        if logs:
+                            self.progress.set(self.currentProgress / self.totalProgress)
+                            self.installLog.write("\n" + "\n".join(logs))
+
+            if not IS_DEBUG:
+                if self.master.installPath.exists():
+                    backupPath = Path(tempfile.mkdtemp(prefix="VRCUtil-Backup-"))/"VRCUtil"
+                    shutil.move(str(self.master.installPath), str(backupPath))
+                shutil.move(str(stagePath), str(self.master.installPath))
+                installSwapped = True
+
+            self.logWithProgress("\nExtract complete")
+
+            if not IS_DEBUG:
+                registry.ExtConnector.connect(
+                    id = "VRCUtilModuleFile",
+                    ext = "vrcutilmodule",
+                    target = self.master.installPath/"ModuleInstaller.exe",
+                    description = "VRCUtil Module File",
+                    icon = self.master.installPath/"ModuleInstaller.exe"
+                )
+            self.logWithProgress(f"\next connected: .vrcutilmodule > {self.master.installPath/'ModuleInstaller.exe'}")
+
+            if not IS_DEBUG:
+                createShortcut(self.master.installPath/"VRCUtil.exe",Path(os.environ["APPDATA"])/"Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk")
+            self.logWithProgress(f"\nStart menu shortcut created: VRCUtil.lnk")
+
+            if not IS_DEBUG:
+                createShortcut(self.master.installPath/"VRCUtil.exe",Path(os.environ["USERPROFILE"])/"Desktop/VRCUtil.lnk")
+            self.logWithProgress(f"\nDesktop shortcut created: VRCUtil.lnk")
+
+            if steamvrInstalled:
+                vr = steam.VR(self.master.installPath/"manifest.vrmanifest")
+                if not vr.installed or not vr.config.exists():
+                    vr.install()
+                    steamvrRegistered = True
+                    self.logWithProgress(f"\nSteamVR app registered")
+                else:
+                    self.logWithProgress(f"\nSteamVR app already registered")
+
+            if not IS_DEBUG:
+                registry.Program.unsetAutostart("VRCUtil")
+                registry.Program.unsetAutostartState("VRCUtil")
+                registry.Program.setStartupShortcut("VRCUtil", self.master.installPath/"VRCUtil.exe", "auto")
+                if registry.Program.startupShortcutState("VRCUtil") is None:
+                    registry.Program.setStartupShortcutState("VRCUtil", False)
+            self.logWithProgress(f"\nStartup shortcut prepared: VRCUtil.lnk")
 
             if not IS_DEBUG:
                 registry.Program.install(
@@ -168,33 +273,7 @@ class InstallPage(tkinter.Page):
                     installDir = self.master.installPath,
                     installDate = datetime.datetime.now()
                 )
-            currentProgress += 1
-            self.progress.set(currentProgress/totalProgress)
-            self.installLog.write("\nRegistry configured: Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VRCUtil")
-
-            if not IS_DEBUG:
-                registry.ExtConnector.connect(
-                    id = "VRCUtilModuleFile",
-                    ext = "vrcutilmodule",
-                    target = self.master.installPath/"ModuleInstaller.exe",
-                    description = "VRCUtil Module File",
-                    icon = self.master.installPath/"ModuleInstaller.exe"
-                )
-            currentProgress += 1
-            self.progress.set(currentProgress/totalProgress)
-            self.installLog.write(f"\next connected: .vrcutilmodule > {self.master.installPath/'ModuleInstaller.exe'}")
-
-            if not IS_DEBUG:
-                createShortcut(self.master.installPath/"VRCUtil.exe",pathlib.Path(os.environ["APPDATA"])/"Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk")
-            currentProgress += 1
-            self.progress.set(currentProgress/totalProgress)
-            self.installLog.write(f"\nStart menu shortcut created: VRCUtil.lnk")
-
-            if not IS_DEBUG:
-                createShortcut(self.master.installPath/"VRCUtil.exe",pathlib.Path(os.environ["USERPROFILE"])/"Desktop/VRCUtil.lnk")
-            currentProgress += 1
-            self.progress.set(currentProgress/totalProgress)
-            self.installLog.write(f"\nDesktop shortcut created: VRCUtil.lnk")
+            self.logWithProgress("\nRegistry configured: Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VRCUtil")
 
             self.message.configure(text=f'Installed VRCUtil {__version__}')
             
@@ -206,13 +285,53 @@ class InstallPage(tkinter.Page):
 
             self.progress.config(Status.Success)
             self.button.config(True,"Done")
+            self.master.setClosable(True)
             self.button.callback=((lambda _: sys.exit(0)) if self.master.autoLaunch.value else self.close)
         except Exception as e:
+            self.installLog.write("\n\nInstallation failed. Rolling back...")
+            try:
+                if not IS_DEBUG and steamvrRegistered and self.master.installPath.exists():
+                    steam.VR(self.master.installPath/"manifest.vrmanifest").uninstall()
+                    self.installLog.write("\nSteamVR registration rollback complete")
+            except Exception as rollback_error:
+                self.installLog.write(f"\nSteamVR rollback failed: {rollback_error}")
+
+            try:
+                if not IS_DEBUG and installSwapped and self.master.installPath.exists():
+                    shutil.rmtree(self.master.installPath, ignore_errors=True)
+                if not IS_DEBUG and backupPath and backupPath.exists():
+                    shutil.move(str(backupPath), str(self.master.installPath))
+                    self.installLog.write("\nApplication files restored")
+                elif not IS_DEBUG and createdFreshInstall:
+                    shutil.rmtree(self.master.installPath, ignore_errors=True)
+            except Exception as rollback_error:
+                self.installLog.write(f"\nFile rollback failed: {rollback_error}")
+
+            if createdFreshInstall:
+                try:
+                    registry.Program.uninstall("VRCUtil")
+                    registry.ExtConnector.disconnect("vrcutilmodule", "VRCUtilModuleFile")
+                    registry.Program.unsetAutostart("VRCUtil")
+                    registry.Program.unsetAutostartState("VRCUtil")
+                    registry.Program.unsetStartupShortcut("VRCUtil")
+                    registry.Program.unsetStartupShortcutState("VRCUtil")
+                    (Path(os.environ["APPDATA"])/"Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk").unlink(missing_ok=True)
+                    (Path(os.environ["USERPROFILE"])/"Desktop/VRCUtil.lnk").unlink(missing_ok=True)
+                    self.installLog.write("\nInstaller side effects rolled back")
+                except Exception as rollback_error:
+                    self.installLog.write(f"\nRegistry/shortcut rollback failed: {rollback_error}")
+
             self.installLog.write(f"\n\nAn error occurred during initialization\n\n{e}")
             self.master.autoLaunch.configure(state="disabled")
             self.progress.config(Status.Critical)
             self.button.config(True,"Close")
+            self.master.setClosable(True)
             self.button.callback=lambda _: sys.exit(1)
+        finally:
+            if stagePath:
+                shutil.rmtree(stagePath.parent, ignore_errors=True)
+            if backupPath:
+                shutil.rmtree(backupPath.parent, ignore_errors=True)
 
     def close(self, _):
         if self.master.autoLaunch.value and not IS_DEBUG:
@@ -220,9 +339,4 @@ class InstallPage(tkinter.Page):
         sys.exit(0)
 
 app = MainWindow("VRCUtil Installer", [500, 300], rootPath/"VRCUtil.ico", False)
-
-if not IS_DEBUG:
-    import pyi_splash
-    pyi_splash.close()
-
 app.start()

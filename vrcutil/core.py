@@ -4,6 +4,7 @@ import logging
 import inspect
 import threading
 import traceback
+from contextlib import contextmanager
 
 from PySide6.QtCore import Qt
 import pywebwinui3.core
@@ -73,10 +74,15 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         self._opengl = None
         self._page_lock = threading.RLock()
         self._module_lock = threading.RLock()
+        self._page_sync_depth = 0
+        self._page_sync_dirty = False
+        self._module_sync_depth = 0
+        self._module_sync_dirty = False
+        self._module_infos: dict[str, list] = {}
         self._dashboard_widget_sort_keys: dict[int, tuple[str, str]] = {}
 
         self.osc = osc.EasyOSC(title, init=False)
-        self.__initVRCUtil__(title, icon)
+        self.__initVRCUtil__()
 
     def resolve_path(self, value):
         if value is None:
@@ -96,15 +102,17 @@ class VRCUtil(pywebwinui3.core.MainWindow):
 
         return super().resolve_path(value)
 
-    def __initVRCUtil__(self, title, icon):
+    def __initVRCUtil__(self):
         self.Modules:dict[str,Module] = {}
-        
-        self.addPage("Dashboard.xaml")
-        self.addSettings("Settings.xaml")
 
-        self.values.set("vrcutil_version", __version__, False)
-        self.values.set("steamvr_state", False, False)
-        self.values.set("vrchat_state", False, False)
+        with self.batch_ui_sync():
+            self.addPage("Dashboard.xaml")
+            self.addSettings("Settings.xaml")
+
+            self.values.set("vrcutil_modules", [], False)
+            self.values.set("vrcutil_version", __version__, False)
+            self.values.set("steamvr_state", False, False)
+            self.values.set("vrchat_state", False, False)
 
     @property
     def opengl(self):
@@ -126,6 +134,59 @@ class VRCUtil(pywebwinui3.core.MainWindow):
     def sync_pages(self):
         self.values._sync("system_pages", None, self.values["system_pages"], True)
 
+    def _request_page_sync(self):
+        with self._page_lock:
+            if self._page_sync_depth:
+                self._page_sync_dirty = True
+                return
+        self.sync_pages()
+
+    def _sync_registered_modules(self):
+        self.values.set(
+            "vrcutil_modules",
+            sorted(
+                self._module_infos.values(),
+                key=lambda item: (str(item[1] or item[0] or "").casefold(), str(item[0] or "").casefold()),
+            ),
+        )
+
+    def _request_module_sync(self):
+        with self._module_lock:
+            if self._module_sync_depth:
+                self._module_sync_dirty = True
+                return
+        self._sync_registered_modules()
+
+    @contextmanager
+    def batch_ui_sync(self):
+        with self._page_lock:
+            self._page_sync_depth += 1
+        with self._module_lock:
+            self._module_sync_depth += 1
+
+        try:
+            yield
+        finally:
+            should_sync_pages = False
+            should_sync_modules = False
+
+            with self._page_lock:
+                self._page_sync_depth = max(0, self._page_sync_depth - 1)
+                if self._page_sync_depth == 0 and self._page_sync_dirty:
+                    self._page_sync_dirty = False
+                    should_sync_pages = True
+
+            with self._module_lock:
+                self._module_sync_depth = max(0, self._module_sync_depth - 1)
+                if self._module_sync_depth == 0 and self._module_sync_dirty:
+                    self._module_sync_dirty = False
+                    should_sync_modules = True
+
+            if should_sync_pages:
+                self.sync_pages()
+            if should_sync_modules:
+                self._sync_registered_modules()
+
     def add_module_widget(self, widget: dict, module_name: str | None, module_path: str | None):
         sort_key = (
             str(module_name or module_path or "").casefold(),
@@ -137,15 +198,18 @@ class VRCUtil(pywebwinui3.core.MainWindow):
             self._dashboard_widget_sort_keys[id(widget)] = sort_key
             container.append(widget)
             container.sort(key=lambda item: self._dashboard_widget_sort_keys.get(id(item), ("", "")))
-            self.sync_pages()
+        self._request_page_sync()
 
     def remove_module_widget(self, widget: dict):
+        changed = False
         with self._page_lock:
             container = self._dashboard_widget_container()
             if widget in container:
                 container.remove(widget)
+                changed = True
             self._dashboard_widget_sort_keys.pop(id(widget), None)
-            self.sync_pages()
+        if changed:
+            self._request_page_sync()
 
     def register_module(self, module_key: str, module_class: "Module"):
         module_info = [
@@ -158,22 +222,30 @@ class VRCUtil(pywebwinui3.core.MainWindow):
 
         with self._module_lock:
             self.Modules[module_key] = module_class
-            modules = [item for item in self.values.get("vrcutil_modules", []) or [] if item[0] != module_key]
-            modules.append(module_info)
-            modules.sort(key=lambda item: (str(item[1] or item[0] or "").casefold(), str(item[0] or "").casefold()))
-            self.values.set("vrcutil_modules", modules)
+            self._module_infos[module_key] = module_info
+        self._request_module_sync()
+
+    def unregister_module(self, module_key: str):
+        with self._module_lock:
+            self.Modules.pop(module_key, None)
+            self._module_infos.pop(module_key, None)
+        self._request_module_sync()
 
     def addSettings(self, pageFile: str | pathlib.Path | None = None, pageData: dict | None = None):
         if pageFile and not pageData:
             pageData = pywebwinui3.util.loadPage(self.resolve_path(pageFile))
         with self._page_lock:
-            return super().addSettings(pageData=pageData)
+            result = super().addSettings(pageData=pageData)
+        self._request_page_sync()
+        return result
 
     def addPage(self, pageFile: str | pathlib.Path | None = None, pageData: dict | None = None):
         if pageFile and not pageData:
             pageData = pywebwinui3.util.loadPage(self.resolve_path(pageFile))
         with self._page_lock:
-            return super().addPage(pageData=pageData)
+            result = super().addPage(pageData=pageData)
+        self._request_page_sync()
+        return result
 
     def syncProcessState(self, data: dict[str, object]):
         logger.info("Sync state received: %s", data)
@@ -218,6 +290,8 @@ class VRCUtil(pywebwinui3.core.MainWindow):
 
 
 class Module:
+    _event_binding_cache: dict[type, list[tuple[str, tuple, tuple]]] = {}
+
     def __init__(self, app:VRCUtil):
         self.app = app
 
@@ -237,14 +311,42 @@ class Module:
         self.__author__:str|None               = self.__info__.get("author")
         self.__description__:str|None          = self.__info__.get("description")
         self.__urls__:list[dict[str,str]]|None = self.__info__.get("urls")
-        logger.info(f"Module loaded {self.__name__ or 'Unknown'}\n{' '*53}| ├─ Path: {self.__path__}\n{' '*53}| ├─ Version: {self.__version__ or 'Unknown'}\n{' '*53}| ├─ Author: {self.__author__ or 'Unknown'}\n{' '*53}| ├─ Description: {self.__description__ or 'Unknown'}")
+        if logger.isEnabledFor(logging.INFO):
+            logger.info(
+                "Module loaded %s\n%s| ├─ Path: %s\n%s| ├─ Version: %s\n%s| ├─ Author: %s\n%s| ├─ Description: %s",
+                self.__name__ or "Unknown",
+                " " * 53,
+                self.__path__,
+                " " * 53,
+                self.__version__ or "Unknown",
+                " " * 53,
+                self.__author__ or "Unknown",
+                " " * 53,
+                self.__description__ or "Unknown",
+            )
+
+    @classmethod
+    def _get_event_bindings(cls):
+        cached = cls._event_binding_cache.get(cls)
+        if cached is not None:
+            return cached
+
+        bindings = []
+        for name, func in inspect.getmembers(cls, inspect.isfunction):
+            event_data = tuple(getattr(func, "__VRCUtil_Events__", ()))
+            osc_paths = tuple(getattr(func, "__VRCUtil_OSCListen__", ()))
+            if event_data or osc_paths:
+                bindings.append((name, event_data, osc_paths))
+
+        cls._event_binding_cache[cls] = bindings
+        return bindings
 
     def __init_event__(self):
-        for _, callback in inspect.getmembers(self, inspect.ismethod):
-            for eventData in getattr(callback.__func__, "__VRCUtil_Events__", []):
-                getattr(self.app.events,eventData[0]).__iadd__(callback if len(eventData)==1 else (eventData[1],callback))
-
-            for path in getattr(callback.__func__, "__VRCUtil_OSCListen__", []):
+        for name, events, osc_paths in self._get_event_bindings():
+            callback = getattr(self, name)
+            for eventData in events:
+                getattr(self.app.events, eventData[0]).__iadd__(callback if len(eventData) == 1 else (eventData[1], callback))
+            for path in osc_paths:
                 self.app.osc.addHandler(path, f"{callback.__name__}_{path}", callback)
 
     def __init_layout__(self):
@@ -287,11 +389,16 @@ class EasyModule(Module):
                 data = json.load(f)
             except:
                 data = {}
+            changed = False
             for k,v in load.items():
-                self.app.values.set(k, data.setdefault(k, v))
-            f.seek(0)
-            f.truncate()
-            json.dump(data, f, ensure_ascii=False, indent=4)
+                if k not in data:
+                    data[k] = v
+                    changed = True
+                self.app.values.set(k, data[k])
+            if changed:
+                f.seek(0)
+                f.truncate()
+                json.dump(data, f, ensure_ascii=False, indent=4)
 
     def __init_value_init__(self, init:dict[str]):
         for k,v in init.items():

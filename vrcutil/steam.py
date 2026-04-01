@@ -32,6 +32,12 @@ def findApp(appid:str) -> str:
 		logger.debug(f"Find app path: {appid} {appPath}")
 		return appPath
 
+def hasSteamVR() -> bool:
+	try:
+		return bool(findApp("250820"))
+	except Exception:
+		return False
+
 class VR:
 	VRCONFIG_DIR = "config/appconfig.json"
 	APPCONFIG_DIR = "config/vrappconfig"
@@ -48,19 +54,38 @@ class VR:
 	
 	@property
 	def name(self) -> str:
-		self._name = self._name or self.info['applications'][0]['name']
+		if not self._name:
+			appInfo = self.info["applications"][0]
+			self._name = (
+				appInfo.get("name")
+				or appInfo.get("strings", {}).get("en_us", {}).get("name")
+				or appInfo.get("app_key")
+			)
 		return self._name
 
 	@property
 	def config(self) -> pathlib.Path:
 		self._config = self._config or installPath()/self.APPCONFIG_DIR/f"{self.name}.vrappconfig"
 		return self._config
+
+	@property
+	def installed(self) -> bool:
+		configData = json.loads(SafeRead(installPath()/self.VRCONFIG_DIR) or "{}")
+		return str(self.manifest) in configData.get("manifest_paths", [])
+
+	@property
+	def autostart(self) -> bool|None:
+		if not self.config.exists():
+			return None
+		return bool(json.loads(SafeRead(self.config) or "{}").get("autolaunch", False))
 	
 	def setAutostart(self, state:bool):
 		if not self.config.exists():
 			self.install()
 
 		appConfigData:dict = json.loads(SafeRead(self.config) or '{"last_launch_time": "0"}')
+		if bool(appConfigData.get("autolaunch", False)) == state:
+			return state
 		with open(self.config, "w") as file:
 			appConfigData["autolaunch"] = state
 			json.dump(appConfigData, file, indent=4)
@@ -70,22 +95,26 @@ class VR:
 		return state
 		
 	def install(self):
-		configData = json.loads(SafeRead(installPath()/self.VRCONFIG_DIR))
-		if str(self.manifest) not in configData["manifest_installPaths"]:
+		configData = json.loads(SafeRead(installPath()/self.VRCONFIG_DIR) or "{}")
+		configData.setdefault("manifest_paths", [])
+		if str(self.manifest) not in configData["manifest_paths"]:
 			with open(installPath()/self.VRCONFIG_DIR, "w") as file:
-				configData["manifest_installPaths"].append(str(self.manifest))
+				configData["manifest_paths"].append(str(self.manifest))
 				json.dump(configData, file, indent=4)
 
-		(self.config).touch()
-		self.setAutostart(False)
+		self.config.parent.mkdir(parents=True, exist_ok=True)
+		if not self.config.exists():
+			with open(self.config, "w") as file:
+				json.dump({"last_launch_time": "0", "autolaunch": False}, file, indent=4)
 
 		logger.info(f"SteamVR app registed: {self.name} {self.manifest}")
 	
 	def uninstall(self):
 		configData = json.loads(SafeRead(installPath()/self.VRCONFIG_DIR))
-		if str(self.manifest) in configData["manifest_installPaths"]:
+		configData.setdefault("manifest_paths", [])
+		if str(self.manifest) in configData["manifest_paths"]:
 			with open(installPath()/self.VRCONFIG_DIR, "w") as file:
-				configData["manifest_installPaths"].remove(str(self.manifest))
+				configData["manifest_paths"].remove(str(self.manifest))
 				json.dump(configData, file, indent=4)
 
 		(self.config).unlink(missing_ok=True)

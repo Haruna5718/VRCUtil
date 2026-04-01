@@ -48,21 +48,28 @@
             </Horizontal>
         </Header>
         <Content padding="8px">
-            <Repeat data="{vrcutil_modules.length}">
-                <Box padding="8px">
-                    <Horizontal>
-                        <Vertical gap="0" align="left">
-                            <Horizontal gap="6px" align="center">
-                                <Text>{vrcutil_modules[{i}][1]}</Text>
-                                <Text type="description">{vrcutil_modules[{i}][2]}</Text>
+            <If data="{vrcutil_modules.length}">
+                <True>
+                    <Repeat data="{vrcutil_modules.length}">
+                        <Box padding="8px">
+                            <Horizontal>
+                                <Vertical gap="0" align="left">
+                                    <Horizontal gap="6px" align="center">
+                                        <Text>{vrcutil_modules[{i}][1]}</Text>
+                                        <Text type="description">{vrcutil_modules[{i}][2]}</Text>
+                                    </Horizontal>
+                                    <Text type="description">{vrcutil_modules[{i}][3]}</Text>
+                                </Vertical>
+                                <Space />
+                                <Button value="vrcutil_removeModule_{vrcutil_modules[{i}][0]}">Remove</Button>
                             </Horizontal>
-                            <Text type="description">{vrcutil_modules[{i}][3]}</Text>
-                        </Vertical>
-                        <Space />
-                        <Button value="vrcutil_removeModule_{vrcutil_modules[{i}][0]}">Remove</Button>
-                    </Horizontal>
-                </Box>
-            </Repeat>
+                        </Box>
+                    </Repeat>
+                </True>
+                <False>
+                    <Text color="var(--TextFillColorDisabledBrush)">There’s nothing here… at least not yet.</Text>
+                </False>
+            </If>
         </Content>
     </Expender>
     <Box>
@@ -98,7 +105,6 @@
                 <Space />
                 <Button type="link" url="https://haruna5718.booth.pm/items/6516021">Booth</Button>
                 <Button type="link" url="https://github.com/Haruna5718/VRCUtil">Github</Button>
-                <Button type="link" url="https://discord.gg/MCVkS9ZUpF">Discord</Button>
             </Horizontal>
         </Header>
         <Content align="left">
@@ -122,7 +128,7 @@ limitations under the License.
             <Horizontal>
                 <Text type="description" url="https://www.python.org/">Python </Text>
                 <Text type="description"></Text>
-                <Text type="description" url="https://github.com/pyinstaller/pyinstaller">PyInstaller </Text>
+                <Text type="description" url="https://github.com/Nuitka/Nuitka">Nuitka </Text>
                 <Text type="description"></Text>
                 <Text type="description" url="https://wiki.qt.io/Qt_for_Python">pyside6 </Text>
                 <Text type="description"></Text>

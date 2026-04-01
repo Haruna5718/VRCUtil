@@ -1,130 +1,239 @@
 import sys
 
-if len(sys.argv) < 2:
-    sys.exit(1)
+__version__ = "1.0.0-dev"
 
-if "debug" in sys.argv:
-	import ctypes
-	ctypes.windll.kernel32.AllocConsole()
-	sys.stdout = open("CONOUT$", "w")
-	sys.stderr = open("CONOUT$", "w")
-	sys.stdin  = open("CONIN$", "r")
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        sys.exit(1)
 
-import json
-import pathlib
-import zipfile
-import threading
-import webbrowser
-import subprocess
-import customtkinter
+    if "debug" in sys.argv:
+        import ctypes
+        ctypes.windll.kernel32.AllocConsole()
+        sys.stdout = open("CONOUT$", "w")
+        sys.stderr = open("CONOUT$", "w")
+        sys.stdin  = open("CONIN$", "r")
 
-from pywebwinui3.type import Status
+    import json
+    import os
+    import shutil
+    import tempfile
+    import pathlib
+    import zipfile
+    import threading
+    import webbrowser
+    import subprocess
+    import ctypes
+    import customtkinter
 
-from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH
+    from pywebwinui3.type import Status
 
-modulePath = pathlib.Path(sys.argv[1])
+    from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH, PACKAGES_PATH
 
-class MainWindow(tkinter.App):
-    def __init__(self, title:str, size:list[int], icon:str, resize:bool=True):
-        super().__init__(title, size, icon, resize)
+    def install_package(module_name: str, target_path: pathlib.Path):
+        pip_executable = INSTALL_PATH / "pip.exe"
+        command = [
+            str(pip_executable),
+            "install",
+            "--disable-pip-version-check",
+            "--no-cache-dir",
+            module_name,
+            "--target",
+            str(target_path),
+        ]
+        env = os.environ.copy()
+        env.pop("PYTHONHOME", None)
+        env.pop("PYTHONPATH", None)
+        env["PATH"] = os.pathsep.join(
+            [str(INSTALL_PATH), str(INSTALL_PATH / "DLLs"), env.get("PATH", "")]
+        ).strip(os.pathsep)
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"pip install failed: {module_name} (exit code {result.returncode})"
+                + (f"\n{output}" if output else "")
+            )
+        return output
 
-        self.page = Infopage(self, self.acm)
-        self.page.grid(row=0, padx=10, pady=(10, 0), sticky="sew")
+    class MainWindow(tkinter.App):
+        def __init__(self, title:str, size:list[int], icon:str, resize:bool=True):
+            super().__init__(title, size, icon, resize)
 
-        tkinter.Button(self, self.acm, text="Install Module", color=Status.Attention, callback=self.install).grid(row=1, padx=10, pady=10, sticky="ews")
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_rowconfigure(0, weight=1)
 
-    def install(self, target:tkinter.Button):
-        self.page.destroy()
-        target.config(False,"Installing")
-        self.page = InstallPage(self, self.acm, target)
-        self.page.grid(row=0, padx=10, pady=(10, 0), sticky="sew")
+            self.page = Infopage(self, self.acm)
+            self.page.grid(row=0, padx=10, pady=(10, 0), sticky="sew")
 
-class Infopage(tkinter.Page):
-    def __init__(self, master:MainWindow, acm):
-        super().__init__(master, acm, round=None)
+            tkinter.Button(self, self.acm, text="Install Module", color=Status.Attention, callback=self.install).grid(row=1, padx=10, pady=10, sticky="ews")
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        def setClosable(self, state:bool):
+            self.after(0, lambda: self._setClosable(state))
 
-        customtkinter.CTkLabel(self, text=installData["name"], font=customtkinter.CTkFont(size=24, weight="bold")).grid(row=0, padx=10, pady=(10, 0), sticky="nw")
-        customtkinter.CTkLabel(self, text=installData["version"], font=customtkinter.CTkFont(size=12)).grid(row=0, padx=15, pady=(7, 0), sticky="ne")
-        customtkinter.CTkLabel(self, text=installData["author"], height=24).grid(row=1, padx=13, pady=(4, 0), sticky="sw")
-        
-        self.frame = customtkinter.CTkFrame(self, fg_color="transparent")
-        self.frame.grid(row=1, padx=10, sticky="se")
-        
-        for data in installData["urls"]:
-            name, url = list(data.items())[0]
-            tkinter.Button(self.frame, self.acm, text=name, width=0, callback=lambda: webbrowser.open(url), color=Status.Attention).pack(padx=(5, 0), side="right")
+        def _setClosable(self, state:bool):
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            if state:
+                ctypes.windll.user32.GetSystemMenu(hwnd, True)
+            else:
+                menu = ctypes.windll.user32.GetSystemMenu(hwnd, False)
+                if menu:
+                    ctypes.windll.user32.RemoveMenu(menu, 0xF060, 0x00000000)
+            ctypes.windll.user32.DrawMenuBar(hwnd)
 
-        self.description = tkinter.Textbox(self, font=customtkinter.CTkFont(size=14), readonly=True)
-        self.description.grid(row=2, padx=10, pady=10, sticky="nsew")
-        self.description.write(installData["description"])
+        def install(self, target:tkinter.Button):
+            self.page.destroy()
+            target.config(False,"Installing")
+            self.setClosable(False)
+            self.page = InstallPage(self, self.acm, target)
+            self.page.grid(row=0, padx=10, pady=(10, 0), sticky="sew")
 
-class InstallPage(tkinter.Page):
-    def __init__(self, master:MainWindow, acm, button:tkinter.Button):
-        super().__init__(master, acm, round=None)
+    class Infopage(tkinter.Page):
+        def __init__(self, master:MainWindow, acm):
+            super().__init__(master, acm, round=None)
 
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_rowconfigure(2, weight=1)
 
-        self.button = button
+            customtkinter.CTkLabel(self, text=installData["name"], font=customtkinter.CTkFont(size=24, weight="bold")).grid(row=0, padx=10, pady=(10, 0), sticky="nw")
+            customtkinter.CTkLabel(self, text=installData["version"], font=customtkinter.CTkFont(size=12)).grid(row=0, padx=15, pady=(7, 0), sticky="ne")
+            customtkinter.CTkLabel(self, text=installData["author"], height=24).grid(row=1, padx=13, pady=(4, 0), sticky="sw")
+            
+            self.frame = customtkinter.CTkFrame(self, fg_color="transparent")
+            self.frame.grid(row=1, padx=10, sticky="se")
+            
+            for data in installData["urls"]:
+                name, url = list(data.items())[0]
+                tkinter.Button(self.frame, self.acm, text=name, width=0, callback=lambda: webbrowser.open(url), color=Status.Attention).pack(padx=(5, 0), side="right")
 
-        self.message = customtkinter.CTkLabel(self, text=f'Installing {installData["name"]} {installData["version"]}', height=16)
-        self.message.grid(row=0, padx=10, pady=(10, 5), sticky="nw")
+            self.description = tkinter.Textbox(self, font=customtkinter.CTkFont(size=14), readonly=True)
+            self.description.grid(row=2, padx=10, pady=10, sticky="nsew")
+            self.description.write(installData["description"])
 
-        self.progress = tkinter.ProgressBar(self, self.acm)
-        self.progress.grid(row=1, padx=10, sticky="ew")
+    class InstallPage(tkinter.Page):
+        def __init__(self, master:MainWindow, acm, button:tkinter.Button):
+            super().__init__(master, acm, round=None)
 
-        self.installLog = tkinter.Textbox(self, readonly=True)
-        self.installLog.grid(row=2, padx=10, pady=10, sticky="nsew")
+            self.grid_columnconfigure(0, weight=1)
+            self.grid_rowconfigure(2, weight=1)
 
-        threading.Thread(target=self.install,daemon=True).start()
+            self.button = button
 
-    def install(self):
-        try:
-            installPath = MODULES_PATH/f'{installData["path"]}'
-            self.installLog.write(f"Install path: {installPath}")
+            self.message = customtkinter.CTkLabel(self, text=f'Installing {installData["name"]} {installData["version"]}', height=16)
+            self.message.grid(row=0, padx=10, pady=(10, 5), sticky="nw")
+
+            self.progress = tkinter.ProgressBar(self, self.acm)
+            self.progress.grid(row=1, padx=10, sticky="ew")
+
+            self.installLog = tkinter.Textbox(self, readonly=True)
+            self.installLog.grid(row=2, padx=10, pady=10, sticky="nsew")
+
+            threading.Thread(target=self.install,daemon=True).start()
+
+        def install(self):
+            stageRoot = None
+            stageModulePath = None
+            stagePackagePath = None
+            backupModulePath = None
+            backupPackagePath = None
+            movedPackages = []
+            replacedPackages = []
+            moduleSwapped = False
             try:
-                with zip_ref.open("requirements.txt") as f:
-                    requirements = [line.strip() for line in f.read().decode("utf-8").splitlines() if line.strip()]
-            except:
-                requirements=[]
-            fileList = zip_ref.infolist()
-            totalProgress = len(fileList)+len(requirements)
-            currentProgress = 0
+                installPath = MODULES_PATH/f'{installData["path"]}'
+                self.installLog.write(f"Install path: {installPath}")
+                stageRoot = pathlib.Path(tempfile.mkdtemp(prefix="VRCUtil-Module-"))
+                stageModulePath = stageRoot / installData["path"]
+                stageModulePath.mkdir(parents=True, exist_ok=True)
+                stagePackagePath = stageRoot / "Packages"
+                stagePackagePath.mkdir(parents=True, exist_ok=True)
+                backupPackagePath = stageRoot / "PackagesBackup"
+                try:
+                    with zip_ref.open("requirements.txt") as f:
+                        requirements = [line.strip() for line in f.read().decode("utf-8").splitlines() if line.strip()]
+                except:
+                    requirements=[]
+                fileList = zip_ref.infolist()
+                totalProgress = len(fileList)+len(requirements)
+                currentProgress = 0
 
-            for info in fileList:
-                self.installLog.write(f"\nExtract: {info.filename}")
-                if not info.is_dir():
-                    zip_ref.extract(info, installPath)
-                currentProgress += 1
-                self.progress.set(currentProgress/totalProgress)
+                for info in fileList:
+                    self.installLog.write(f"\nExtract: {info.filename}")
+                    if not info.is_dir():
+                        zip_ref.extract(info, stageModulePath)
+                    currentProgress += 1
+                    self.progress.set(currentProgress/totalProgress)
 
-            for moduleName in requirements:
-                self.installLog.write(f"\nPackage install: {moduleName}")
-                subprocess.run([str(INSTALL_PATH/"_internal/pip.exe"), "install", "--no-cache-dir", moduleName, "--target", str(INSTALL_PATH / "_internal")],creationflags=subprocess.CREATE_NO_WINDOW)
-                currentProgress += 1
-                self.progress.set(currentProgress/totalProgress)
+                for moduleName in requirements:
+                    self.installLog.write(f"\nPackage install: {moduleName}")
+                    output = install_package(moduleName, stagePackagePath)
+                    if output:
+                        self.installLog.write(f"\n{output}")
+                    currentProgress += 1
+                    self.progress.set(currentProgress/totalProgress)
 
-            self.progress.config(Status.Success)
-            self.button.config(True,"Launch VRCUtil")
-            self.button.callback=self.close
-        except Exception as e:
-            self.installLog.write(f"\n\nAn error occurred during module initialization\n\n{e}")
-            self.progress.config(Status.Critical)
-            self.button.config(True,"Close")
-            self.button.callback=lambda _: sys.exit(1)
+                if installPath.exists():
+                    backupModulePath = stageRoot / "__module_backup__"
+                    shutil.move(str(installPath), str(backupModulePath))
+                shutil.move(str(stageModulePath), str(installPath))
+                moduleSwapped = True
 
-    def close(self, _):
-        subprocess.Popen([INSTALL_PATH/"VRCUtil.exe"], cwd=INSTALL_PATH)
-        sys.exit(0)
+                for packagePath in sorted(stagePackagePath.iterdir()):
+                    targetPath = PACKAGES_PATH / packagePath.name
+                    if targetPath.exists():
+                        backupTargetPath = backupPackagePath / packagePath.name
+                        backupTargetPath.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(targetPath), str(backupTargetPath))
+                        replacedPackages.append(packagePath.name)
+                    shutil.move(str(packagePath), str(targetPath))
+                    movedPackages.append(packagePath.name)
 
-with zipfile.ZipFile(modulePath, 'r') as zip_ref:
-    with zip_ref.open("module.json") as f:
-        installData = json.load(f)
+                self.progress.config(Status.Success)
+                self.button.config(True,"Launch VRCUtil")
+                self.button.callback=self.close
+                self.master.setClosable(True)
+            except Exception as e:
+                self.installLog.write("\n\nInstall failed. Rolling back...")
+                for packageName in reversed(movedPackages):
+                    targetPath = PACKAGES_PATH / packageName
+                    if targetPath.is_dir():
+                        shutil.rmtree(targetPath, ignore_errors=True)
+                    else:
+                        targetPath.unlink(missing_ok=True)
 
-        MainWindow(title="VRCUtil Module Installer", size=[400,200], icon=INSTALL_PATH/"VRCUtil.ico").start()
+                if backupPackagePath and backupPackagePath.exists():
+                    for packagePath in sorted(backupPackagePath.iterdir()):
+                        shutil.move(str(packagePath), str(PACKAGES_PATH / packagePath.name))
+
+                if moduleSwapped and installPath.exists():
+                    shutil.rmtree(installPath, ignore_errors=True)
+                if backupModulePath and backupModulePath.exists():
+                    shutil.move(str(backupModulePath), str(installPath))
+
+                self.installLog.write(f"\n\nAn error occurred during module initialization\n\n{e}")
+                self.progress.config(Status.Critical)
+                self.button.config(True,"Close")
+                self.button.callback=lambda _: sys.exit(1)
+                self.master.setClosable(True)
+            finally:
+                if stageRoot:
+                    shutil.rmtree(stageRoot, ignore_errors=True)
+
+        def close(self, _):
+            subprocess.Popen([INSTALL_PATH/"VRCUtil.exe"], cwd=INSTALL_PATH)
+            sys.exit(0)
+
+    PACKAGES_PATH.mkdir(parents=True, exist_ok=True)
+    sys.path.insert(0, str(PACKAGES_PATH))
+
+    with zipfile.ZipFile(pathlib.Path(sys.argv[1]), 'r') as zip_ref:
+        with zip_ref.open("module.json") as f:
+            installData = json.load(f)
+
+            MainWindow(title="VRCUtil Module Installer", size=[400,200], icon=INSTALL_PATH/"VRCUtil.ico", resize=False).start()

@@ -131,6 +131,7 @@ class ProcessWatcher:
 		self._last_seen: dict[str, bool] = {}
 		self._creation_enabled = True
 		self._deletion_enabled = True
+		self._stop_event = threading.Event()
 
 	def _ensure_executor(self):
 		if self._callback_executor is None:
@@ -182,10 +183,12 @@ class ProcessWatcher:
 					return
 				logger.error("An error occurred while polling process state", exc_info=True)
 
-			time.sleep(self._poll_interval)
+			if self._stop_event.wait(self._poll_interval):
+				return
 
 	def start(self, creation=True, deletion=True, checkCurrent=False):
 		self.running = True
+		self._stop_event.clear()
 		self._creation_enabled = creation
 		self._deletion_enabled = deletion
 		self._ensure_executor()
@@ -211,8 +214,9 @@ class ProcessWatcher:
 
 	def stop(self):
 		self.running = False
+		self._stop_event.set()
 		for thread in self.threads[:]:
-			thread.join(timeout=1)
+			thread.join(timeout=0.25)
 		self.threads = []
 		self._last_seen = {}
 		if self._callback_executor is not None:

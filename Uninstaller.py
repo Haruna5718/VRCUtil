@@ -1,38 +1,37 @@
 import sys
-
-if "debug" in sys.argv:
-	import ctypes
-	ctypes.windll.kernel32.AllocConsole()
-	sys.stdout = open("CONOUT$", "w")
-	sys.stderr = open("CONOUT$", "w")
-	sys.stdin = open("CONIN$", "r")
-
 import os
 import pathlib
 import shutil
 import subprocess
 import tempfile
 import threading
+import ctypes
 
 import customtkinter
 from PIL import Image
 
 from pywebwinui3.type import Status
 
-from vrcutil import DATA_PATH, INSTALL_PATH, IS_DEBUG, __version__, registry, steam, tkinter
+import vrcutil
+from vrcutil import DATA_PATH, IS_DEBUG, registry, steam, tkinter
 
-UNINSTALL_ARG = "-uninstall"
-CURRENT_EXECUTABLE = pathlib.Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
-TARGET_APP_ROOT = pathlib.Path(sys.argv[sys.argv.index(UNINSTALL_ARG) + 1]).resolve() if UNINSTALL_ARG in sys.argv and len(sys.argv) > sys.argv.index(UNINSTALL_ARG) + 1 else (pathlib.Path(__file__).resolve().parent if IS_DEBUG else INSTALL_PATH)
+__version__ = "2.0.0-dev"
 
+TARGET_APP_ROOT = pathlib.Path(__file__ if IS_DEBUG else sys.argv[0]).resolve().parent
+
+if not IS_DEBUG:
+	try:
+		if pathlib.Path.cwd().resolve().is_relative_to(TARGET_APP_ROOT):
+			os.chdir(tempfile.gettempdir())
+	except Exception:
+		pass
 
 def process_exists(image_name: str) -> bool:
-	flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
 	result = subprocess.run(
 		["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
 		capture_output=True,
 		text=True,
-		creationflags=flags,
+		creationflags=subprocess.CREATE_NO_WINDOW,
 	)
 	if result.returncode != 0:
 		return False
@@ -79,11 +78,25 @@ class MainWindow(tkinter.App):
 
 		tkinter.Button(self, self.acm, text="Uninstall", color=Status.Critical, callback=self.uninstall).grid(row=1, padx=20, pady=20, sticky="e")
 
+	def setClosable(self, state:bool):
+		self.after(0, lambda: self._setClosable(state))
+
+	def _setClosable(self, state:bool):
+		hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+		if state:
+			ctypes.windll.user32.GetSystemMenu(hwnd, True)
+		else:
+			menu = ctypes.windll.user32.GetSystemMenu(hwnd, False)
+			if menu:
+				ctypes.windll.user32.RemoveMenu(menu, 0xF060, 0x00000000)
+		ctypes.windll.user32.DrawMenuBar(hwnd)
+
 	def uninstall(self, target: tkinter.Button):
 		self.removeDataValue = bool(self.removeData.value)
 		self.removeData.destroy()
 		self.page.destroy()
 		target.config(False, "Uninstalling", Status.Attention)
+		self.setClosable(False)
 		self.page = UninstallPage(self, self.acm, target)
 		self.page.grid(row=0, sticky="snew")
 
@@ -102,7 +115,7 @@ class WelcomePage(tkinter.Page):
 		).grid(row=0, padx=20, pady=20, sticky="ne", rowspan=3)
 
 		customtkinter.CTkLabel(self, text="VRCUtil", font=customtkinter.CTkFont(size=24, weight="bold")).grid(row=0, padx=20, pady=(20, 0), sticky="nw")
-		customtkinter.CTkLabel(self, text=f"Version: {__version__}").grid(row=1, padx=23, pady=(0, 28), sticky="nw")
+		customtkinter.CTkLabel(self, text=f"Version: {vrcutil.__version__}").grid(row=1, padx=23, pady=(0, 28), sticky="nw")
 
 
 class UninstallPage(tkinter.Page):
@@ -113,7 +126,7 @@ class UninstallPage(tkinter.Page):
 		self.grid_rowconfigure(2, weight=1)
 
 		self.button = button
-		self.message = customtkinter.CTkLabel(self, text=f"Uninstalling VRCUtil {__version__}", height=16)
+		self.message = customtkinter.CTkLabel(self, text=f"Uninstalling VRCUtil {vrcutil.__version__}", height=16)
 		self.message.grid(row=0, padx=10, pady=(10, 5), sticky="nw")
 
 		self.progress = tkinter.ProgressBar(self, self.acm)
@@ -126,7 +139,7 @@ class UninstallPage(tkinter.Page):
 
 	def uninstall(self):
 		try:
-			total_progress = 8 if self.master.removeDataValue else 7
+			total_progress = 7 if self.master.removeDataValue else 6
 			current_progress = 0
 
 			self.uninstallLog.write("Starting uninstallation")
@@ -148,12 +161,6 @@ class UninstallPage(tkinter.Page):
 			current_progress += 1
 			self.progress.set(current_progress / total_progress)
 
-			if TARGET_APP_ROOT.exists() and not IS_DEBUG:
-				shutil.rmtree(TARGET_APP_ROOT)
-			self.uninstallLog.write(f"\nRemoved: Application files")
-			current_progress += 1
-			self.progress.set(current_progress / total_progress)
-
 			if self.master.removeDataValue:
 				if DATA_PATH.exists() and not IS_DEBUG:
 					shutil.rmtree(DATA_PATH)
@@ -172,6 +179,9 @@ class UninstallPage(tkinter.Page):
 			self.progress.set(current_progress / total_progress)
 
 			registry.Program.unsetAutostart("VRCUtil")
+			registry.Program.unsetAutostartState("VRCUtil")
+			registry.Program.unsetStartupShortcut("VRCUtil")
+			registry.Program.unsetStartupShortcutState("VRCUtil")
 			self.uninstallLog.write("\nStartup entry removed")
 			current_progress += 1
 			self.progress.set(current_progress / total_progress)
@@ -193,27 +203,31 @@ class UninstallPage(tkinter.Page):
 			current_progress += 1
 			self.progress.set(current_progress / total_progress)
 
-			self.message.configure(text=f"Uninstalled VRCUtil {__version__}")
+			self.message.configure(text=f"Uninstalled VRCUtil {vrcutil.__version__}")
 			self.progress.config(Status.Success)
 			self.button.config(True, "Done")
+			self.master.setClosable(True)
 			self.button.callback = self.close
 		except Exception as e:
 			self.uninstallLog.write(f"\n\nAn error occurred during uninstallation\n\n{e}")
 			self.progress.config(Status.Critical)
 			self.button.config(True, "Close")
+			self.master.setClosable(True)
 			self.button.callback = lambda _: sys.exit(1)
 
 	def close(self, _):
 		if not IS_DEBUG:
-			subprocess.Popen(["cmd", "/c", f"timeout /T 5 >nul & rmdir /S /Q {CURRENT_EXECUTABLE.parent}"], creationflags=subprocess.CREATE_NO_WINDOW)
+			subprocess.Popen(["cmd", "/c", f"timeout /T 5 >nul & rmdir /S /Q {pathlib.Path(__file__).resolve().parent}"], creationflags=subprocess.CREATE_NO_WINDOW)
 		sys.exit(0)
 
+if __name__ == "__main__":
+	
+	if "debug" in sys.argv:
+		import ctypes
+		ctypes.windll.kernel32.AllocConsole()
+		sys.stdout = open("CONOUT$", "w")
+		sys.stderr = open("CONOUT$", "w")
+		sys.stdin = open("CONIN$", "r")
 
-if not UNINSTALL_ARG in sys.argv and getattr(sys, "frozen", False):
-	tempUninstaller = pathlib.Path(tempfile.mkdtemp()) / CURRENT_EXECUTABLE.name
-	shutil.copy2(CURRENT_EXECUTABLE, tempUninstaller)
-	subprocess.Popen([str(tempUninstaller), UNINSTALL_ARG, str(TARGET_APP_ROOT)], creationflags=subprocess.CREATE_NO_WINDOW)
-	sys.exit(0)
-
-app = MainWindow("VRCUtil Uninstaller", [500, 300], pathlib.Path("./" if IS_DEBUG else sys._MEIPASS)/"VRCUtil.ico", False)
-app.start()
+	app = MainWindow("VRCUtil Uninstaller", [500, 300], pathlib.Path(__file__).resolve().parent/"VRCUtil.ico", False)
+	app.start()

@@ -2,6 +2,7 @@ WINDOW_NAME = "VRCUtil"
 MUTEX_NAME = "Haruna5718.VRCUtil"
 RELEASE_URL = "https://github.com/Haruna5718/VRCUtil/releases/latest"
 RELEASE_API_URL = "https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest"
+UPDATE_CHECK_INTERVAL = 60 * 60
 
 # Args ========================================
 
@@ -137,7 +138,7 @@ with SafeJson(DATA_PATH/"Setting.json") as setting:
         "settings_osc_send": 9000,
         "settings_osc_receive": 0,
         "settings_autoStart": "0",
-        "settings_checkUpdate": False
+        "settings_checkUpdate": True
     }
     for k,v in settingInit.items():
         app.values.set(k, setting.data.setdefault(k, v), False)
@@ -168,11 +169,15 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from pywebwinui3.core import Status
 
 _notified_update_version = None
+_update_check_lock = threading.Lock()
+_update_check_stop = threading.Event()
 
 @app.onValueChange("settings_checkUpdate")
 def checkUpdate(*_):
     global _notified_update_version
     if app.values.get("settings_checkUpdate", False):
+        if not _update_check_lock.acquire(blocking=False):
+            return
         try:
             app.values.set("vrcutil_latest", "fetching")
             with urllib.request.urlopen(RELEASE_API_URL, timeout=5) as resp:
@@ -197,7 +202,15 @@ def checkUpdate(*_):
                 return app.values.set("vrcutil_hasUpdate", '0' if latest_version != __version__ else '')
         except:
             pass
+        finally:
+            _update_check_lock.release()
     app.values.set("vrcutil_latest", "unknown")
+
+def updateCheckLoop():
+    checkUpdate()
+    while not _update_check_stop.wait(UPDATE_CHECK_INTERVAL):
+        if app.values.get("settings_checkUpdate", False):
+            checkUpdate()
 
 
 @app.onValueChange("settings_autoStart")
@@ -308,10 +321,11 @@ def removeModule(key, *_):
 
 @app.onSetup()
 def startBackgroundTasks():
-    threading.Thread(target=checkUpdate, daemon=True).start()
+    threading.Thread(target=updateCheckLoop, daemon=True).start()
 
 @app.onExit()
 def CloseServices():
+    _update_check_stop.set()
     try:
         app.osc.stop()
     except:

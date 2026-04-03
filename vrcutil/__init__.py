@@ -4,7 +4,7 @@ import pathlib
 
 __all__ = ["event", "file", "osc", "registry", "steam", "wmi", "tkinter", "core", "process"]
 
-__version__ = '3.0.0'
+__version__ = '3.0.1'
 
 IS_COMPILED = "__compiled__" in globals()
 

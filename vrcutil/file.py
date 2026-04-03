@@ -110,7 +110,21 @@ class SafeJson(SafeOpen):
 class EasySetting:
 	@staticmethod
 	def _getPath(func,file) -> pathlib.Path:
-		return pathlib.Path(func.__code__.co_filename).resolve().parent/(file or "Setting.json")
+		if file:
+			target = pathlib.Path(file)
+			if target.is_absolute():
+				return target
+		module_file = None
+		try:
+			module_file = func.__globals__.get("__file__")
+		except Exception:
+			module_file = None
+		if module_file:
+			return pathlib.Path(module_file).resolve().parent / (file or "Setting.json")
+		filename = pathlib.Path(func.__code__.co_filename)
+		if not filename.is_absolute():
+			filename = pathlib.Path.cwd() / filename
+		return filename.resolve().parent / (file or "Setting.json")
 	
 	@classmethod
 	def useData(cls, settingFile=None):

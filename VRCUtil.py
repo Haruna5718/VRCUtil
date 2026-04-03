@@ -1,28 +1,59 @@
-from vrcutil import __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH, PACKAGES_PATH, IS_DEBUG, registry, steam
-from vrcutil.file import SafeOpen, EasySetting, BufferedJsonSaver
+WINDOW_NAME = "VRCUtil"
+MUTEX_NAME = "Haruna5718.VRCUtil"
+RELEASE_URL = "https://github.com/Haruna5718/VRCUtil/releases/latest"
+RELEASE_API_URL = "https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest"
+
+# Args ========================================
+
+import argparse
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--overlay", nargs=2, metavar=("PORT", "KEY"))
+parser.add_argument("--debug", action="store_true")
+parser.add_argument("--minimize", action="store_true")
+
+args = parser.parse_args()
+
+# Overlay ========================================
+
+if (args.overlay):
+    from vrcutil.overlay import _OverlayServer
+    raise SystemExit(_OverlayServer().serve(int(args.overlay[0]), args.overlay[1]))
+
+# Single ========================================
+
+import ctypes
 import sys
 
-lockFile = SafeOpen(INSTALL_PATH/"VRCUtil.lock", "w", wait=False)
-if lockFile.file == None:
-    sys.exit(1)
+ERROR_ALREADY_EXISTS = 183
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+user32 = ctypes.WinDLL("user32", use_last_error=True)
 
-import threading
-import json
-import time
+CreateMutexW = kernel32.CreateMutexW
+CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+CreateMutexW.restype = ctypes.c_void_p
+
+CloseHandle = kernel32.CloseHandle
+CloseHandle.argtypes = [ctypes.c_void_p]
+CloseHandle.restype = ctypes.c_bool
+
+mutexHandle = CreateMutexW(None, True, f"Local\\{MUTEX_NAME}")
+if not mutexHandle:
+    raise ctypes.WinError(ctypes.get_last_error())
+
+if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+    hwnd = user32.FindWindowW(None, WINDOW_NAME)
+    if hwnd:
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)
+        user32.SetForegroundWindow(hwnd)
+    CloseHandle(mutexHandle)
+    sys.exit(0)
+
+# Log ========================================
+
 import logging
-import urllib.request
-import subprocess
-import tempfile
-import shutil
-import importlib.util
-import traceback
-import os
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, wait
-
-from pywebwinui3.core import Status
-
-from vrcutil.core import VRCUtil, Module, logger
 
 logging.getLogger("asyncio").setLevel(logging.INFO)
 logging.getLogger("PIL.Image").setLevel(logging.INFO)
@@ -35,139 +66,17 @@ logging.basicConfig(
 
 from Logger import open_log_window
 
-app = VRCUtil("VRCUtil","VRCUtil.ico")
-LATEST_RELEASE_URL = "https://github.com/Haruna5718/VRCUtil/releases/latest"
-_notified_update_version = None
-AUTO_MODE = "auto" in sys.argv
+# Setting ========================================
 
-def syncSteamVRAutostart(state: bool):
-    manifest = INSTALL_PATH / "manifest.vrmanifest"
-    if not manifest.exists() or not steam.hasSteamVR():
-        return
-    vr = steam.VR(manifest)
-    if state and (not vr.installed or not vr.config.exists()):
-        vr.install()
+from vrcutil.core import VRCUtil, Module, logger
 
-    if state:
-        vr.setAutostart(True)
-    elif vr.installed and vr.autostart:
-        vr.setAutostart(False)
+app = VRCUtil(WINDOW_NAME,"VRCUtil.ico")
 
-def syncSystemAutostart(state: bool):
-    registry.Program.unsetAutostart("VRCUtil")
-    registry.Program.unsetAutostartState("VRCUtil")
+from vrcutil import __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH, PACKAGES_PATH, IS_COMPILED, EXECUTABLE, registry, steam
+from vrcutil.file import SafeJson, BufferedJsonSaver
+import json
 
-    shortcut = registry.Program.startupShortcutPath("VRCUtil")
-    if state and not shortcut.exists():
-        if IS_DEBUG:
-            registry.Program.setStartupShortcut(
-                "VRCUtil",
-                sys.executable,
-                subprocess.list2cmdline([str((INSTALL_PATH / "VRCUtil.py").resolve()), "auto"]),
-                INSTALL_PATH / "VRCUtil.ico",
-            )
-        else:
-            registry.Program.setStartupShortcut(
-                "VRCUtil",
-                INSTALL_PATH / "VRCUtil.exe",
-                "auto",
-            )
-
-    if shortcut.exists():
-        current = registry.Program.startupShortcutState("VRCUtil")
-        if current != state:
-            registry.Program.setStartupShortcutState("VRCUtil", state)
-
-def syncAutostart():
-    mode = str(app.values.get("settings_autoStart", "0"))
-
-    try:
-        syncSteamVRAutostart(mode == "1")
-    except Exception:
-        logger.error("Failed to sync SteamVR autostart\n%s", traceback.format_exc())
-
-    try:
-        syncSystemAutostart(mode == "3")
-    except Exception:
-        logger.error("Failed to sync system autostart\n%s", traceback.format_exc())
-
-
-def notifyUpdate(latest_version: str):
-    global _notified_update_version
-
-    if latest_version == __version__ or latest_version == _notified_update_version:
-        return
-
-    _notified_update_version = latest_version
-    app.notice(
-        Status.Attention,
-        "Update available",
-        f"{latest_version} is available. Current version is {__version__}.",
-        {
-            "tag": "Button",
-            "text": "Open Release",
-            "attr": {
-                "type": "link",
-                "url": LATEST_RELEASE_URL,
-            },
-            "child": [],
-        },
-    )
-
-@app.onValueChange("settings_checkUpdate")
-def checkUpdate(*_):
-    if app.values.get("settings_checkUpdate", False):
-        try:
-            app.values.set("vrcutil_latest", "fetching")
-            with urllib.request.urlopen("https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest", timeout=5) as resp:
-                latest_version = json.load(resp)["tag_name"]
-                app.values.set("vrcutil_latest", latest_version)
-                if latest_version != __version__:
-                    notifyUpdate(latest_version)
-                return app.values.set("vrcutil_hasUpdate", '0' if latest_version != __version__ else '')
-        except:
-            pass
-    app.values.set("vrcutil_latest", "unknown")
-
-
-@app.onValueChange("settings_autoStart")
-def updateAutostart(*_):
-    syncAutostart()
-
-@EasySetting.useData(DATA_PATH/"Setting.json")
-def settingDataInit(setting:dict):
-    settingSaver = BufferedJsonSaver(DATA_PATH/"Setting.json")
-    setting.pop("system_window_min_width", None)
-    setting.pop("system_window_min_height", None)
-    settingValues = {
-        "system_pin": False,
-        "system_theme": "system",
-        "system_window_width": 900,
-        "system_window_height": 600,
-        "settings_osc_address": "127.0.0.1",
-        "settings_osc_send": 9000,
-        "settings_osc_receive": 0,
-        "settings_autoStart": "0",
-        "settings_checkUpdate": False
-    }
-    for k,v in settingValues.items():
-        app.values.set(k, setting.setdefault(k, v), False)
-
-    def saveSettingValue(key, _, value):
-        settingSaver.save(key, value)
-
-    for key_pattern in (
-        "system_theme",
-        "system_pin",
-        "system_window_width",
-        "system_window_height",
-        "settings_*",
-    ):
-        app.events.valueChange += (key_pattern, saveSettingValue)
-    app.events.valueChange += ("settings_osc_address", initClient)
-    app.events.valueChange += ("settings_osc_send", initClient)
-    app.events.valueChange += ("settings_osc_address", initServer)
-    app.events.valueChange += ("settings_osc_receive", initServer)
+import threading
 
 def initClient(*_):
     address = app.values.get("settings_osc_address")
@@ -216,6 +125,104 @@ def initServer(*_, direct=False):
     app.osc._initServer(app.values["system_title"], target_address, target_port)
     app.values.set("vrcutil_osc_receive",app.osc.server.server_address[1])
 
+settingSaver = BufferedJsonSaver(DATA_PATH/"Setting.json")
+
+with SafeJson(DATA_PATH/"Setting.json") as setting:
+    settingInit = {
+        "system_pin": False,
+        "system_theme": "system",
+        "system_window_width": 900,
+        "system_window_height": 600,
+        "settings_osc_address": "127.0.0.1",
+        "settings_osc_send": 9000,
+        "settings_osc_receive": 0,
+        "settings_autoStart": "0",
+        "settings_checkUpdate": False
+    }
+    for k,v in settingInit.items():
+        app.values.set(k, setting.data.setdefault(k, v), False)
+
+    setting.save()
+
+    app.events.valueChange += ("settings_*", lambda k, _, v: settingSaver.save(k, v))
+    app.events.valueChange += ("system_theme", lambda k, _, v: settingSaver.save(k, v))
+    app.events.valueChange += ("system_pin", lambda k, _, v: settingSaver.save(k, v))
+    app.events.valueChange += ("system_window_width", lambda k, _, v: settingSaver.save(k, v))
+    app.events.valueChange += ("system_window_height", lambda k, _, v: settingSaver.save(k, v))
+    app.events.valueChange += ("settings_osc_address", initClient)
+    app.events.valueChange += ("settings_osc_address", initServer)
+    app.events.valueChange += ("settings_osc_send", initClient)
+    app.events.valueChange += ("settings_osc_receive", initServer)
+
+import urllib.request
+import subprocess
+import tempfile
+import shutil
+import importlib.util
+import site
+import traceback
+import os
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, wait
+
+from pywebwinui3.core import Status
+
+_notified_update_version = None
+
+@app.onValueChange("settings_checkUpdate")
+def checkUpdate(*_):
+    global _notified_update_version
+    if app.values.get("settings_checkUpdate", False):
+        try:
+            app.values.set("vrcutil_latest", "fetching")
+            with urllib.request.urlopen(RELEASE_API_URL, timeout=5) as resp:
+                latest_version = json.load(resp)["tag_name"]
+                app.values.set("vrcutil_latest", latest_version)
+                if latest_version != __version__ and latest_version != _notified_update_version:
+                    _notified_update_version = latest_version
+                    app.notice(
+                        Status.Attention,
+                        "Update available",
+                        f"{latest_version} is available. Current version is {__version__}.",
+                        {
+                            "tag": "Button",
+                            "text": "Open Release",
+                            "attr": {
+                                "type": "link",
+                                "url": RELEASE_URL,
+                            },
+                            "child": [],
+                        },
+                    )
+                return app.values.set("vrcutil_hasUpdate", '0' if latest_version != __version__ else '')
+        except:
+            pass
+    app.values.set("vrcutil_latest", "unknown")
+
+
+@app.onValueChange("settings_autoStart")
+def updateAutostart(*_):
+    if IS_COMPILED:
+        mode = str(app.values.get("settings_autoStart", "0"))
+
+        try:
+            manifest = INSTALL_PATH / "manifest.vrmanifest"
+            if manifest.exists() and steam.hasSteamVR():
+                vr = steam.VR(manifest)
+                if mode == "1":
+                    if not vr.installed or not vr.config.exists():
+                        vr.install()
+                    vr.setAutostart(True)
+                elif vr.installed and vr.autostart:
+                    vr.setAutostart(False)
+        except Exception:
+            logger.error("Failed to sync SteamVR autostart\n%s", traceback.format_exc())
+
+        try:
+            registry.Program.setStartupShortcutState("VRCUtil", mode=="3")
+        except Exception:
+            logger.error("Failed to sync system autostart\n%s", traceback.format_exc())
+
 def loadModule():
     modules = sorted(
         [i for i in MODULES_PATH.iterdir() if i.is_dir() and not i.name.startswith("_")],
@@ -230,22 +237,21 @@ def loadModule():
             wait([executor.submit(moduleSetup, module) for module in modules])
 
 def resolveModuleEntry(path: Path) -> Path | None:
-    pyd_entries = sorted(path.glob("__init__*.pyd"))
-    if pyd_entries:
-        return pyd_entries[0]
+    if (entry:=sorted(path.glob("__init__*.pyd"))):
+        return entry[0]
 
-    py_entry = path / "__init__.py"
-    if py_entry.exists():
-        return py_entry
+    if (entry := sorted(path.glob("__init__*.pyc"))):
+        return entry[0]
 
-    return None
+    if (entry := path / "__init__.py").is_file():
+        return entry
 
 def moduleSetup(path:Path):
     try:
         entry = resolveModuleEntry(path)
         if entry is None:
             raise ImportError(f"Failed to find module entry for {path.name}")
-        Spec = importlib.util.spec_from_file_location(path.name, entry)
+        Spec = importlib.util.spec_from_file_location(path.name, entry, submodule_search_locations=[str(path)],)
         if Spec is None or Spec.loader is None:
             raise ImportError(f"Failed to create module spec for {path.name}")
         module = importlib.util.module_from_spec(Spec)
@@ -259,11 +265,9 @@ def moduleSetup(path:Path):
 
 def bootstrapRuntime():
     PACKAGES_PATH.mkdir(parents=True, exist_ok=True)
-    for path in (INSTALL_PATH/"Lib", INSTALL_PATH/"DLLs", PACKAGES_PATH):
-        if path.exists():
-            resolved = str(path)
-            if resolved not in sys.path:
-                sys.path.append(resolved)
+    packagesPath = str(PACKAGES_PATH)
+    if packagesPath not in sys.path:
+        site.addsitedir(packagesPath)
     initClient()
     initServer(direct=True)
     loadModule()
@@ -271,22 +275,11 @@ def bootstrapRuntime():
 
 GlobalTempDir = None
 
-def CleanTempDir():
-    if not GlobalTempDir:
-        return
-    subprocess.Popen(["cmd", "/c", f"timeout /T 5 >nul & rmdir /S /Q {GlobalTempDir}"], creationflags=subprocess.CREATE_NO_WINDOW)
-
-def restartCommand():
-    args = [arg for arg in sys.argv[1:] if arg != "auto"]
-    if IS_DEBUG:
-        return [sys.executable, str((INSTALL_PATH / "VRCUtil.py").resolve()), *args]
-    return [str((INSTALL_PATH / "VRCUtil.exe").resolve()), *args]
-
 @app.onValueChange("vrcutil_restart")
 def restart(*_):
     CloseServices()
     subprocess.Popen(
-        ["cmd", "/c", f"timeout /T 1 >nul & {subprocess.list2cmdline(restartCommand())}"],
+        ["cmd", "/c", f"timeout /T 1 >nul & {EXECUTABLE}{' --debug' if args.debug else ''}"],
         cwd=INSTALL_PATH,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
@@ -306,17 +299,12 @@ def removeModule(key, *_):
             app._request_page_sync()
         app.unregister_module(moduleName)
 
-    modulePath = MODULES_PATH/moduleName
-    GlobalTempDir = GlobalTempDir or Path(tempfile.mkdtemp())
-    shutil.move(str(modulePath), str(GlobalTempDir/modulePath.name))
+    if IS_COMPILED:
+        modulePath = MODULES_PATH/moduleName
+        GlobalTempDir = GlobalTempDir or Path(tempfile.mkdtemp())
+        shutil.move(str(modulePath), str(GlobalTempDir/modulePath.name))
 
     app.notice(Status.Attention, "Restart required", f"please restart for remove {moduleName} completly",{"tag":"Button","text":"Restart","attr":{"value":"vrcutil_restart"},"child":[]})
-
-@app.onSetup()
-def setLockfile():
-    lockFile.seek(0)
-    lockFile.truncate()
-    lockFile.flush()
 
 @app.onSetup()
 def startBackgroundTasks():
@@ -325,19 +313,20 @@ def startBackgroundTasks():
 @app.onExit()
 def CloseServices():
     try:
-        app.stop_process_monitor()
-    except:
-        pass
-    try:
         app.osc.stop()
     except:
         pass
     try:
-        lockFile.close()
+        ctypes.windll.kernel32.CloseHandle(mutexHandle)
     except:
         pass
     try:
-        CleanTempDir()
+        app.stop_process_monitor()
+    except:
+        pass
+    try:
+        if GlobalTempDir:
+            subprocess.Popen(["cmd", "/c", f"timeout /T 5 >nul & rmdir /S /Q {GlobalTempDir}"], creationflags=subprocess.CREATE_NO_WINDOW)
     except:
         pass
 
@@ -345,12 +334,11 @@ def CloseServices():
 def openlog(*_):
     open_log_window()
 
-settingDataInit()
 threading.Thread(target=bootstrapRuntime, daemon=True).start()
 
 app.start(
-    debug = "debug" in sys.argv,
-    minimized = AUTO_MODE,
+    debug = args.debug,
+    minimized = args.minimize,
     onTop = app.values.get("system_pin", False),
     min_width=800,
     min_height=500,

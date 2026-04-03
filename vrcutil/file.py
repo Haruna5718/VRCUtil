@@ -8,14 +8,19 @@ import functools
 import win32file
 
 class SafeOpen:
-	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=False):
+	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=False, timeout=None, attempts=None, interval=0.01):
 		self.path = pathlib.Path(path)
 		self.mode = mode
 		self.encoding = encoding
+		self.timeout = timeout
+		self.attempts = attempts
+		self.interval = interval
 		self.file = None
 		self._open(wait, touch)
 
 	def _open(self, isWait, isTouch):
+		start = time.monotonic()
+		attempt = 0
 		if isTouch:
 			self.path.parent.mkdir(parents=True, exist_ok=True)
 			self.path.touch()
@@ -28,11 +33,17 @@ class SafeOpen:
 				return self.file
 			except (OSError, PermissionError):
 				if isWait:
+					attempt += 1
+					if self.attempts is not None and attempt >= self.attempts:
+						return None
+					if self.timeout is not None and time.monotonic() - start >= self.timeout:
+						return None
 					try:
 						f.close()
 					except:
 						pass
-					time.sleep(0.01)
+					if self.interval > 0:
+						time.sleep(self.interval)
 				else:
 					return None
 
@@ -77,6 +88,24 @@ def SafeRead(path: str|pathlib.Path) -> str:
 	finally:
 		if handle:
 			win32file.CloseHandle(handle)
+
+class SafeJson(SafeOpen):
+	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=True, timeout=None, attempts=None, interval=0.01):
+		super().__init__(path, mode, encoding, wait, touch, timeout, attempts, interval)
+		if self.file:
+			try:
+				self.data = json.load(self.file)
+			except:
+				self.data = {}
+		else:
+			self.data = {}
+
+	def save(self):
+		if self.file is None:
+			return
+		self.file.seek(0)
+		self.file.truncate()
+		json.dump(self.data, self.file, ensure_ascii=False, indent=4)
 
 class EasySetting:
 	@staticmethod

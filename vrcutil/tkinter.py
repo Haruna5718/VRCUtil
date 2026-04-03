@@ -308,6 +308,19 @@ class App(customtkinter.CTk):
         y=(self.winfo_screenheight()*scale-height)//2#-90*scale
         self.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
 
+    def setClosable(self, state:bool):
+        self.after(0, lambda: self._setClosable(state))
+
+    def _setClosable(self, state:bool):
+        hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+        if state:
+            ctypes.windll.user32.GetSystemMenu(hwnd, True)
+        else:
+            menu = ctypes.windll.user32.GetSystemMenu(hwnd, False)
+            if menu:
+                ctypes.windll.user32.RemoveMenu(menu, 0xF060, 0x00000000)
+        ctypes.windll.user32.DrawMenuBar(hwnd)
+
     def start(self):
         self.acm.start()
         super().mainloop()

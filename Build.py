@@ -6,11 +6,11 @@ import sys
 import enum
 import subprocess
 import importlib.util
-import py_compile
 import time
 from pathlib import Path
 import shutil
 import tarfile
+import zipfile
 import zstandard as zstd
 
 MINIMAL_LIB_ROOTS = (
@@ -205,7 +205,6 @@ class Nuitka:
 				option.append(f"--windows-icon-from-ico={self.icon}")
 			if self.needAdmin:
 				option.append("--windows-uac-admin")
-
 			if self.product:
 				option.append(f"--product-name={self.product}")
 			if self.company:
@@ -297,6 +296,7 @@ class Nuitka:
 
 class CodeSign:
 	_signtool_path = None
+	_timestamp_url = "http://timestamp.digicert.com"
 	def __init__(self, name:str):
 		self.thumbprint = subprocess.run(
 			[
@@ -307,12 +307,15 @@ class CodeSign:
 				"-Command",
 				f"""
 					$subject = 'CN={name}'
+					$now = Get-Date
+					$desiredNotAfter = $now.AddYears(100)
+					$minimumAcceptableNotAfter = $now.AddYears(50)
 					$cert = Get-ChildItem Cert:\\CurrentUser\\My -CodeSigningCert |
 						Where-Object {{ $_.Subject -eq $subject }} |
 						Sort-Object NotAfter -Descending |
 						Select-Object -First 1
-					if (-not $cert) {{
-						$cert = New-SelfSignedCertificate -Subject $subject -Type CodeSigning -CertStoreLocation 'Cert:\\CurrentUser\\My' -HashAlgorithm 'SHA256'
+					if (-not $cert -or $cert.NotAfter -lt $minimumAcceptableNotAfter) {{
+						$cert = New-SelfSignedCertificate -Subject $subject -Type CodeSigning -CertStoreLocation 'Cert:\\CurrentUser\\My' -HashAlgorithm 'SHA256' -NotAfter $desiredNotAfter
 						$cerPath = Join-Path $env:TEMP 'VRCUtil.cer'
 						Export-Certificate -Cert $cert -FilePath $cerPath -Force | Out-Null
 						Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\\CurrentUser\\TrustedPublisher' | Out-Null
@@ -356,6 +359,10 @@ class CodeSign:
 			[
 				str(self._FindSignTool()),
 				"sign",
+				"/tr",
+				self._timestamp_url,
+				"/td",
+				"SHA256",
 				"/fd",
 				"SHA256",
 				"/sha1",
@@ -452,6 +459,68 @@ class ProgressPrinter:
         sys.stdout.flush()
         self._last_line = line
 
+def CopyMinimalPythonRuntime(target:Path):
+	import _distutils_hack
+	import setuptools
+
+	base = Path(sys.base_prefix)
+	lib = target/"Lib"
+	site = lib/"site-packages"
+	python_tag = f"python{sys.version_info.major}{sys.version_info.minor}"
+	stdlib_zip = target/f"{python_tag}.zip"
+	pth = target/f"{python_tag}._pth"
+	package_root = Path(setuptools.__file__).resolve().parent.parent
+
+	lib.mkdir(parents=True, exist_ok=True)
+	site.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(base/"python.exe", target/"python.exe")
+	for dll in ("python3.dll", f"{python_tag}.dll"):
+		source = base/dll
+		if source.exists():
+			shutil.copy2(source, target/dll)
+
+	stdlib_zip.unlink(missing_ok=True)
+	with zipfile.ZipFile(stdlib_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+		for name in MINIMAL_LIB_ROOTS:
+			source = base/"Lib"/name
+			if not source.exists():
+				continue
+			if source.is_dir():
+				for file in source.rglob("*"):
+					if file.is_file():
+						archive.write(file, file.relative_to(base/"Lib").as_posix())
+			else:
+				archive.write(source, name)
+
+	for source, name in (
+		(Path(setuptools.__file__).resolve().parent, "setuptools"),
+		(Path(_distutils_hack.__file__).resolve().parent, "_distutils_hack"),
+	):
+		shutil.copytree(source, site/name, dirs_exist_ok=True)
+
+	for pattern in ("setuptools-*.dist-info", "wheel-*.dist-info"):
+		for source in package_root.glob(pattern):
+			shutil.copytree(source, site/source.name, dirs_exist_ok=True)
+
+	for name in ("distutils-precedence.pth",):
+		source = package_root/name
+		if source.exists():
+			shutil.copy2(source, site/name)
+
+	pth.write_text(
+		"\n".join(
+			(
+				stdlib_zip.name,
+				".",
+				"Lib",
+				"Lib\\site-packages",
+				"import site",
+				"",
+			)
+		),
+		encoding="utf-8",
+	)
+
 # ========================================
 
 if __name__ == "__main__":
@@ -487,6 +556,7 @@ if __name__ == "__main__":
 	VRCUtil.IncludeModuleData("glfw")
 	VRCUtil.IncludeModuleData("OpenGL")
 	VRCUtil.IncludeModuleData("pywebwinui3")
+	VRCUtil.IncludeModuleData("customtkinter")
 
 	VRCUtil.IncludeFile("Dashboard.xaml")
 	VRCUtil.IncludeFile("Settings.xaml")
@@ -499,24 +569,6 @@ if __name__ == "__main__":
 
 	VRCUtil.Build(target)
 	Signer.Sign(target/"VRCUtil.exe")
-
-	# ========================================
-
-	Overlay = Nuitka(
-		file="Overlay.py",
-		name="Overlay",
-		icon="VRCUtil.ico",
-		buildType=Nuitka.BuildType.ONE_DIR,
-	)
-
-	Overlay.SetInformation(
-		version=VRCUTIL_VERSION,
-		name=Overlay.name,
-		company="Haruna5718",
-	)
-
-	Overlay.Build(target)
-	Signer.Sign(target/"Overlay.exe")
 
 	# ========================================
 
@@ -544,7 +596,6 @@ if __name__ == "__main__":
 	Pip.IncludeModule("pip._vendor")
 	Pip.IncludeModule("_distutils_hack")
 	Pip.IncludeModule("_distutils_hack.override")
-	Pip.IncludeFile(Path(sys.base_prefix)/"python.exe")
 	Pip.IncludeFile(pip_dir / "__pip-runner__.py", "pip/__pip-runner__.py")
 	Pip.IncludeFile(pip_dir / "_vendor" / "certifi" / "cacert.pem", "pip/_vendor/certifi/cacert.pem")
 	Pip.IncludeFile(pip_dir / "_vendor" / "vendor.txt", "pip/_vendor/vendor.txt")
@@ -554,6 +605,7 @@ if __name__ == "__main__":
 	Pip.IncludeFile(Path(_distutils_hack.__file__).resolve().parent, "_distutils_hack")
 
 	Pip.Build(target)
+	CopyMinimalPythonRuntime(target)
 	Signer.Sign(target/"pip.exe")
 
 	# ========================================

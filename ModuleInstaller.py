@@ -1,6 +1,6 @@
 import sys
 
-__version__ = "1.0.0-dev"
+__version__ = "1.0.0"
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -27,9 +27,22 @@ if __name__ == "__main__":
 
     from pywebwinui3.type import Status
 
-    from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH, PACKAGES_PATH
+    from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH, PACKAGES_PATH, IS_COMPILED
+    from vrcutil.process import closeProcessImage
 
-    def install_package(module_name: str, target_path: pathlib.Path):
+    def preserve_module_setting(previous_path: pathlib.Path, current_path: pathlib.Path):
+        previous_setting = previous_path / "Setting.json"
+        current_setting = current_path / "Setting.json"
+        if not previous_setting.exists():
+            return False
+        current_setting.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(previous_setting, current_setting)
+        return True
+
+    def closeRunningVRCUtil() -> tuple[bool, bool]:
+        return closeProcessImage("VRCUtil.exe")
+
+    def install_package(module_name: str, target_path: pathlib.Path, on_output=None):
         pip_executable = INSTALL_PATH / "pip.exe"
         command = [
             str(pip_executable),
@@ -37,27 +50,42 @@ if __name__ == "__main__":
             "--disable-pip-version-check",
             "--no-cache-dir",
             module_name,
+            "--upgrade",
             "--target",
             str(target_path),
         ]
         env = os.environ.copy()
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
+        env["PYTHONUNBUFFERED"] = "1"
         env["PATH"] = os.pathsep.join(
             [str(INSTALL_PATH), str(INSTALL_PATH / "DLLs"), env.get("PATH", "")]
         ).strip(os.pathsep)
 
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             env=env,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            bufsize=1,
         )
-        output = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
-        if result.returncode != 0:
+        output_lines = []
+        assert process.stdout is not None
+        for raw_line in process.stdout:
+            line = raw_line.rstrip("\r\n")
+            if not line:
+                continue
+            output_lines.append(line)
+            if on_output:
+                on_output(line)
+        process.stdout.close()
+        result = process.wait()
+        output = "\n".join(output_lines)
+        if result != 0:
             raise RuntimeError(
-                f"pip install failed: {module_name} (exit code {result.returncode})"
+                f"pip install failed: {module_name} (exit code {result})"
                 + (f"\n{output}" if output else "")
             )
         return output
@@ -73,19 +101,6 @@ if __name__ == "__main__":
             self.page.grid(row=0, padx=10, pady=(10, 0), sticky="sew")
 
             tkinter.Button(self, self.acm, text="Install Module", color=Status.Attention, callback=self.install).grid(row=1, padx=10, pady=10, sticky="ews")
-
-        def setClosable(self, state:bool):
-            self.after(0, lambda: self._setClosable(state))
-
-        def _setClosable(self, state:bool):
-            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
-            if state:
-                ctypes.windll.user32.GetSystemMenu(hwnd, True)
-            else:
-                menu = ctypes.windll.user32.GetSystemMenu(hwnd, False)
-                if menu:
-                    ctypes.windll.user32.RemoveMenu(menu, 0xF060, 0x00000000)
-            ctypes.windll.user32.DrawMenuBar(hwnd)
 
         def install(self, target:tkinter.Button):
             self.page.destroy()
@@ -148,6 +163,9 @@ if __name__ == "__main__":
             try:
                 installPath = MODULES_PATH/f'{installData["path"]}'
                 self.installLog.write(f"Install path: {installPath}")
+                closed, forced = closeRunningVRCUtil()
+                if closed:
+                    self.installLog.write("\nClosed running VRCUtil" + (" (forced)" if forced else ""))
                 stageRoot = pathlib.Path(tempfile.mkdtemp(prefix="VRCUtil-Module-"))
                 stageModulePath = stageRoot / installData["path"]
                 stageModulePath.mkdir(parents=True, exist_ok=True)
@@ -172,9 +190,11 @@ if __name__ == "__main__":
 
                 for moduleName in requirements:
                     self.installLog.write(f"\nPackage install: {moduleName}")
-                    output = install_package(moduleName, stagePackagePath)
-                    if output:
-                        self.installLog.write(f"\n{output}")
+                    install_package(
+                        moduleName,
+                        stagePackagePath,
+                        lambda line: self.installLog.write(f"\n{line}"),
+                    )
                     currentProgress += 1
                     self.progress.set(currentProgress/totalProgress)
 
@@ -183,6 +203,9 @@ if __name__ == "__main__":
                     shutil.move(str(installPath), str(backupModulePath))
                 shutil.move(str(stageModulePath), str(installPath))
                 moduleSwapped = True
+                if backupModulePath and backupModulePath.exists():
+                    if preserve_module_setting(backupModulePath, installPath):
+                        self.installLog.write("\nPreserved: Setting.json")
 
                 for packagePath in sorted(stagePackagePath.iterdir()):
                     targetPath = PACKAGES_PATH / packagePath.name

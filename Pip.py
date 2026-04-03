@@ -147,6 +147,12 @@ def patch_package_finder_cache() -> None:
     PackageFinder.find_best_candidate = find_best_candidate
 
 
+def bundled_python_executable() -> str:
+    executable = Path(sys.executable).resolve()
+    candidate = executable if executable.name.lower() == "python.exe" else executable.with_name("python.exe")
+    return str(candidate if candidate.exists() else executable)
+
+
 def patch_pip_subprocess_runner() -> None:
     from pip._internal import build_env
     from pip._internal.utils import subprocess as pip_subprocess
@@ -174,10 +180,36 @@ def patch_pip_subprocess_runner() -> None:
     build_env.call_subprocess = call_subprocess
 
 
+def patch_pyproject_hooks_python() -> None:
+    from pip._vendor.pyproject_hooks import _impl
+
+    original_init = _impl.BuildBackendHookCaller.__init__
+
+    def __init__(
+        self,
+        source_dir: str,
+        build_backend: str,
+        backend_path=None,
+        runner=None,
+        python_executable: str | None = None,
+    ) -> None:
+        original_init(
+            self,
+            source_dir,
+            build_backend,
+            backend_path,
+            runner,
+            bundled_python_executable() if not python_executable else python_executable,
+        )
+
+    _impl.BuildBackendHookCaller.__init__ = __init__
+
+
 def apply_pip_runtime_patches() -> None:
     patch_distlib_finder()
     patch_package_finder_cache()
     patch_pip_subprocess_runner()
+    patch_pyproject_hooks_python()
     patch_wheel_supported()
 
 

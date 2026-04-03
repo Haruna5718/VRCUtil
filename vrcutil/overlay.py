@@ -18,7 +18,7 @@ import openvr
 from OpenGL.GL import GL_CLAMP_TO_EDGE, GL_LINEAR, GL_PIXEL_UNPACK_BUFFER, GL_RGBA, GL_STREAM_DRAW, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_MIN_FILTER, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE, glBindBuffer, glBindTexture, glBufferData, glBufferSubData, glDeleteBuffers, glDeleteTextures, glGenBuffers, glGenTextures, glPixelStorei, glTexImage2D, glTexParameteri, glTexSubImage2D
 from PIL import Image
 
-from . import INSTALL_PATH, IS_DEBUG
+from . import INSTALL_PATH, IS_COMPILED
 
 
 def _reserve_port() -> int:
@@ -28,10 +28,18 @@ def _reserve_port() -> int:
 
 
 def _host_command(port: int, key: str) -> list[str]:
-    args = [f"--overlay-port={port}", f"--overlay-key={key}"]
-    if IS_DEBUG:
-        return [sys.executable, str(INSTALL_PATH / "Overlay.py"), *args]
-    return [str(INSTALL_PATH / "Overlay.exe"), *args]
+    args = [f"--overlay", f"{port}", f"{key}"]
+    if not IS_COMPILED:
+        return [sys.executable, str(INSTALL_PATH / "VRCUtil.py"), *args]
+    return [str(INSTALL_PATH / "VRCUtil.exe"), *args]
+
+
+def _host_startupinfo():
+    if os.name != "nt":
+        return None
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.lpAttributeList["parent_process"] = int(ctypes.windll.kernel32.GetCurrentProcess())
+    return startupinfo
 
 
 class _OverlayProcessClient:
@@ -68,7 +76,12 @@ class _OverlayProcessClient:
             key_text = secrets.token_hex(32)
             key = key_text.encode("ascii")
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self._process = subprocess.Popen(_host_command(port, key_text), creationflags=creationflags)
+            self._process = subprocess.Popen(
+                _host_command(port, key_text),
+                creationflags=creationflags,
+                cwd=INSTALL_PATH,
+                startupinfo=_host_startupinfo(),
+            )
 
             try:
                 self._connection = self._connect(port, key)
@@ -701,21 +714,3 @@ class _OverlayServer:
         finally:
             listener.close()
             self.close()
-
-
-def run_overlay_host(argv: list[str] | None = None) -> int:
-    argv = argv or sys.argv[1:]
-    port = None
-    key = None
-
-    for arg in argv:
-        if arg.startswith("--overlay-port="):
-            port = int(arg.removeprefix("--overlay-port="))
-        elif arg.startswith("--overlay-key="):
-            key = arg.removeprefix("--overlay-key=")
-
-    if port is None or key is None:
-        raise RuntimeError("Overlay host requires --overlay-port and --overlay-key")
-
-    _OverlayServer().serve(port, key)
-    return 0

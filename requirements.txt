@@ -7,7 +7,6 @@ vdf
 customtkinter
 zeroconf
 PyOpenGL
-PyOpenGL-accelerate
 glfw
 numpy
 openvr

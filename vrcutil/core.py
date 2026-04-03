@@ -80,6 +80,9 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         self._module_sync_dirty = False
         self._module_infos: dict[str, list] = {}
         self._dashboard_widget_sort_keys: dict[int, tuple[str, str]] = {}
+        self._steamvr_overlay_lock = threading.Lock()
+        self._steamvr_overlay_pending: bool | None = None
+        self._steamvr_overlay_worker: threading.Thread | None = None
 
         self.osc = osc.EasyOSC(title, init=False)
         self.__initVRCUtil__()
@@ -93,12 +96,15 @@ class VRCUtil(pywebwinui3.core.MainWindow):
             return path
 
         install_candidate = INSTALL_PATH / path
-        if install_candidate.exists() or install_candidate.parent.exists():
-            return install_candidate.resolve()
-
         data_candidate = DATA_PATH / path
-        if data_candidate.exists() or data_candidate.parent.exists():
+        if data_candidate.exists():
             return data_candidate.resolve()
+        if install_candidate.exists():
+            return install_candidate.resolve()
+        if data_candidate.parent.exists():
+            return data_candidate.resolve()
+        if install_candidate.parent.exists():
+            return install_candidate.resolve()
 
         return super().resolve_path(value)
 
@@ -247,6 +253,48 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         self._request_page_sync()
         return result
 
+    def _schedule_overlay_sync(self, state: bool):
+        with self._steamvr_overlay_lock:
+            self._steamvr_overlay_pending = state
+            if self._steamvr_overlay_worker and self._steamvr_overlay_worker.is_alive():
+                return
+
+            self._steamvr_overlay_worker = threading.Thread(
+                target=self._run_overlay_sync,
+                daemon=True,
+            )
+            self._steamvr_overlay_worker.start()
+
+    def _run_overlay_sync(self):
+        from . import overlay
+
+        while True:
+            with self._steamvr_overlay_lock:
+                state = self._steamvr_overlay_pending
+                self._steamvr_overlay_pending = None
+
+            if state is None:
+                with self._steamvr_overlay_lock:
+                    self._steamvr_overlay_worker = None
+                return
+
+            try:
+                if state:
+                    logger.info("try to init openvr...")
+                    overlay.Manager.openvr()
+                    logger.info("openvr initialized")
+                else:
+                    logger.info("try to stop openvr...")
+                    overlay.Manager.stop()
+                    logger.info("openvr stopped")
+            except Exception:
+                logger.error("Failed to sync OpenVR state\n%s", traceback.format_exc())
+
+            with self._steamvr_overlay_lock:
+                if self._steamvr_overlay_pending is None:
+                    self._steamvr_overlay_worker = None
+                    return
+
     def syncProcessState(self, data: dict[str, object]):
         logger.info("Sync state received: %s", data)
         for key, value in data.items():
@@ -255,38 +303,20 @@ class VRCUtil(pywebwinui3.core.MainWindow):
             before = bool(self.values.get(value_key, False))
 
             if key == "steamvr" and before != state:
-                try:
-                    from . import overlay
-
-                    if state:
-                        logger.info("try to init openvr...")
-                        overlay.Manager.openvr()
-                        logger.info("openvr initialized")
-                    else:
-                        logger.info("try to stop openvr...")
-                        overlay.Manager.stop()
-                        logger.info("openvr stopped")
-                except Exception:
-                    logger.error("Failed to sync OpenVR state\n%s", traceback.format_exc())
+                self._schedule_overlay_sync(state)
 
             self.values.set(value_key, state)
 
     def start(self, debug=False, minimized=False, onTop=None, min_width=None, min_height=None):
         if onTop is not None:
             self.values.set("system_pin", bool(onTop), False)
-        if min_width is not None or min_height is not None:
-            self.sync_window_min_size(
-                self._window_min_width if min_width is None else min_width,
-                self._window_min_height if min_height is None else min_height,
-                sync=False,
-            )
 
         self.api.ensure_runtime(debug=debug)
 
         if minimized and self.api._window is not None:
-            self.api._window.setWindowState(self.api._window.windowState() | Qt.WindowMinimized)
+            self.api._window.setWindowState(self.api._window.windowState() | Qt.WindowState.WindowMinimized)
 
-        super().start(debug)
+        super().start(debug, min_width, min_height)
 
 
 class Module:
@@ -332,7 +362,11 @@ class Module:
             return cached
 
         bindings = []
-        for name, func in inspect.getmembers(cls, inspect.isfunction):
+        for name, attr in cls.__dict__.items():
+            func = attr
+            if isinstance(attr, (staticmethod, classmethod)):
+                func = attr.__func__
+
             event_data = tuple(getattr(func, "__VRCUtil_Events__", ()))
             osc_paths = tuple(getattr(func, "__VRCUtil_OSCListen__", ()))
             if event_data or osc_paths:

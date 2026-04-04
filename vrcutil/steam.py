@@ -45,6 +45,7 @@ class VR:
 		self.manifest = pathlib.Path(manifest)
 		self._manifestData = None
 		self._name = None
+		self._app_key = None
 		self._config = None
 	
 	@property
@@ -64,8 +65,14 @@ class VR:
 		return self._name
 
 	@property
+	def app_key(self) -> str:
+		if not self._app_key:
+			self._app_key = self.info["applications"][0]["app_key"]
+		return self._app_key
+
+	@property
 	def config(self) -> pathlib.Path:
-		self._config = self._config or installPath()/self.APPCONFIG_DIR/f"{self.name}.vrappconfig"
+		self._config = self._config or installPath()/self.APPCONFIG_DIR/f"{self.app_key}.vrappconfig"
 		return self._config
 
 	@property

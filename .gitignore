@@ -1,16 +1,10 @@
 .venv/
 build/
-dist/
 
 __pycache__/
 
 Modules/
 
-*.lock
-
 Setting.json
-
-pyinstaller/
-upx.exe
 
 .vscode/

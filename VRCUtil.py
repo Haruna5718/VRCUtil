@@ -30,6 +30,7 @@ import sys
 ERROR_ALREADY_EXISTS = 183
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 
 CreateMutexW = kernel32.CreateMutexW
 CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
@@ -38,6 +39,12 @@ CreateMutexW.restype = ctypes.c_void_p
 CloseHandle = kernel32.CloseHandle
 CloseHandle.argtypes = [ctypes.c_void_p]
 CloseHandle.restype = ctypes.c_bool
+
+SetCurrentProcessExplicitAppUserModelID = shell32.SetCurrentProcessExplicitAppUserModelID
+SetCurrentProcessExplicitAppUserModelID.argtypes = [ctypes.c_wchar_p]
+SetCurrentProcessExplicitAppUserModelID.restype = ctypes.c_long
+
+SetCurrentProcessExplicitAppUserModelID(MUTEX_NAME)
 
 mutexHandle = CreateMutexW(None, True, f"Local\\{MUTEX_NAME}")
 if not mutexHandle:
@@ -76,8 +83,15 @@ app = VRCUtil(WINDOW_NAME,"VRCUtil.ico")
 from vrcutil import __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH, PACKAGES_PATH, IS_COMPILED, EXECUTABLE, registry, steam
 from vrcutil.file import SafeJson, BufferedJsonSaver
 import json
+import os
+from pathlib import Path
 
 import threading
+
+try:
+    registry.setShortcutAppId(Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk", MUTEX_NAME)
+except Exception:
+    pass
 
 def initClient(*_):
     address = app.values.get("settings_osc_address")
@@ -162,8 +176,6 @@ import shutil
 import importlib.util
 import site
 import traceback
-import os
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, wait
 
 from pywebwinui3.core import Status

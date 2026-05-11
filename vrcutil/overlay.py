@@ -185,7 +185,7 @@ class OpenGLManager:
                 except Exception:
                     pass
 
-    def submit(self, image, overlay, overlay_handle: int | None, name: str = "Default"):
+    def submit(self, image, overlay, overlay_handle: int | None, name: str = "Default", sync: bool = False):
         handle = overlay_handle if overlay_handle is not None else getattr(overlay, "overlay_handle", None)
         if handle is None:
             raise RuntimeError("Overlay is not initialized")
@@ -201,14 +201,17 @@ class OpenGLManager:
             shm.buf[: len(payload)] = payload
             shared_name = shm.name
 
-        Manager.post(
-            "set_texture_shared",
-            overlay_handle=int(handle),
-            name=name,
-            size=rgba.size,
-            byte_length=len(payload),
-            shared_name=shared_name,
-        )
+        payload_data = {
+            "overlay_handle": int(handle),
+            "name": name,
+            "size": rgba.size,
+            "byte_length": len(payload),
+            "shared_name": shared_name,
+        }
+        if sync:
+            Manager.request("set_texture_shared", **payload_data)
+        else:
+            Manager.post("set_texture_shared", **payload_data)
 
 
 class _OverlayCommandDispatcher:
@@ -350,11 +353,26 @@ class VROverlay:
         self.Width = self.Width
         return self
 
-    def transform(self, vertical: Align = Align.LEFT, horizontal: Align = Align.BOTTOM, x: float = 0.0, y: float = 0.0, z: float = 1.2):
+    def transform(
+        self,
+        vertical: Align = Align.LEFT,
+        horizontal: Align = Align.BOTTOM,
+        x: float = 0.0,
+        y: float = 0.0,
+        z: float = 1.2,
+        tracked_device_index: int | None = None,
+    ):
         if self.overlay_handle is None:
             raise RuntimeError("Overlay is not initialized")
 
-        transform = (int(vertical), int(horizontal), float(x), float(y), float(z))
+        transform = (
+            int(vertical),
+            int(horizontal),
+            float(x),
+            float(y),
+            float(z),
+            openvr.k_unTrackedDeviceIndex_Hmd if tracked_device_index is None else int(tracked_device_index),
+        )
         if self._last_transform == transform:
             return self
         self._last_transform = transform
@@ -368,6 +386,7 @@ class VROverlay:
             x=transform[2],
             y=transform[3],
             z=transform[4],
+            tracked_device_index=transform[5],
         )
         return self
 
@@ -565,7 +584,7 @@ class _OverlayServer:
         self.initialize()
         self.overlay.setOverlayWidthInMeters(overlay_handle, float(width))
 
-    def transform(self, overlay_handle: int, vertical: int, horizontal: int, x: float, y: float, z: float):
+    def transform(self, overlay_handle: int, vertical: int, horizontal: int, x: float, y: float, z: float, tracked_device_index: int | None = None):
         self.initialize()
         transform = openvr.HmdMatrix34_t()
 
@@ -594,7 +613,7 @@ class _OverlayServer:
 
         self.overlay.setOverlayTransformTrackedDeviceRelative(
             overlay_handle,
-            openvr.k_unTrackedDeviceIndex_Hmd,
+            openvr.k_unTrackedDeviceIndex_Hmd if tracked_device_index is None else int(tracked_device_index),
             transform,
         )
 

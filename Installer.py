@@ -44,6 +44,7 @@ def createShortcut(target:str|Path,outPath:str|Path):
         shortcut.WorkingDirectory = str(target.parent)
         shortcut.IconLocation = str(target)
         shortcut.Save()
+        registry.setShortcutAppId(outPath)
     finally:
         pythoncom.CoUninitialize()
 

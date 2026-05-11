@@ -5,7 +5,28 @@ import datetime
 import logging
 import os
 
+from . import APP_ID
+
 logger = logging.getLogger("vrcutil.registry")
+
+
+def setShortcutAppId(shortcutPath:str|pathlib.Path, appId:str=APP_ID):
+    shortcutPath = pathlib.Path(shortcutPath)
+    if not shortcutPath.exists():
+        return
+    try:
+        from win32com.propsys import propsys, pscon
+        from win32com.shell import shellcon
+        store = propsys.SHGetPropertyStoreFromParsingName(
+            str(shortcutPath),
+            None,
+            shellcon.GPS_READWRITE,
+            propsys.IID_IPropertyStore,
+        )
+        store.SetValue(pscon.PKEY_AppUserModel_ID, propsys.PROPVARIANTType(str(appId)))
+        store.Commit()
+    except Exception:
+        logger.debug("Failed to set AppUserModelID for shortcut %s", shortcutPath, exc_info=True)
 
 class valueType(enum.IntEnum):
     str = winreg.REG_SZ
@@ -168,6 +189,7 @@ class Program:
             shortcut.WorkingDirectory = str(target.parent)
             shortcut.IconLocation = str(icon or target)
             shortcut.Save()
+            setShortcutAppId(shortcut_path)
         finally:
             pythoncom.CoUninitialize()
 

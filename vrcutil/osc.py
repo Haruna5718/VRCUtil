@@ -165,10 +165,24 @@ class EasyOSC:
         self.client.send_message(path, value)
 
     def addHandler(self, path:str, id:str, callback, *args: list, needs_reply_address: bool = False):
-        self._namedHandler[id] = self._dispatcher.map(path, callback, *args, needs_reply_address)
+        if current := self._namedHandler.pop(id, None):
+            currentPath, currentHandler = current
+            try:
+                self._dispatcher.unmap(currentPath, currentHandler)
+            except Exception:
+                pass
+        handler = self._dispatcher.map(path, callback, *args, needs_reply_address)
+        self._namedHandler[id] = (path, handler)
 
     def removeHandler(self, path:str, id:str):
-        self._dispatcher.unmap(path, self._namedHandler[id])
+        current = self._namedHandler.pop(id, None)
+        if current is None:
+            return
+        currentPath, currentHandler = current
+        try:
+            self._dispatcher.unmap(currentPath, currentHandler)
+        except Exception:
+            pass
 
     def getHandlers(self, path:str=None, callback=None):
         m = self._dispatcher._map

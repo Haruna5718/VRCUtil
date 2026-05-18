@@ -13,6 +13,36 @@ import tarfile
 import zipfile
 import zstandard as zstd
 
+
+def _rmtree_with_retry(path: Path | str, retries: int = 10, delay: float = 0.25, required: bool = False) -> bool:
+	path = Path(path)
+	if not path.exists():
+		return True
+
+	def _onexc(func, target, excinfo):
+		try:
+			os.chmod(target, 0o777)
+			func(target)
+		except Exception:
+			pass
+
+	last_error = None
+	for _ in range(retries):
+		try:
+			shutil.rmtree(path, onexc=_onexc)
+			return True
+		except FileNotFoundError:
+			return True
+		except OSError as exc:
+			last_error = exc
+			time.sleep(delay)
+
+	if required and last_error is not None:
+		raise last_error
+
+	print(f"Warning: failed to remove directory '{path}', keeping it.")
+	return False
+
 MINIMAL_LIB_ROOTS = (
 	"__future__.py",
 	"_collections_abc.py",
@@ -285,7 +315,7 @@ class Nuitka:
 				shutil.move(str(result), str(output))
 			else:
 				shutil.copytree(result, output, dirs_exist_ok=True)
-				shutil.rmtree(result)
+				_rmtree_with_retry(result, required=False)
 		elif self.buildType == Nuitka.BuildType.ONE_FILE:
 			onefile = build/f"{self.name}.exe"
 			output.mkdir(exist_ok=True)

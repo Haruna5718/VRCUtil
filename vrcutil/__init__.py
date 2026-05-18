@@ -4,7 +4,7 @@ import pathlib
 
 __all__ = ["event", "file", "osc", "registry", "steam", "wmi", "tkinter", "core", "process"]
 
-__version__ = '3.0.3'
+__version__ = '3.0.4'
 APP_ID = "Haruna5718.VRCUtil"
 
 IS_COMPILED = "__compiled__" in globals()

@@ -211,7 +211,7 @@ def checkUpdate(*_):
                             "child": [],
                         },
                     )
-                return app.values.set("vrcutil_hasUpdate", '0' if latest_version != __version__ else '')
+                return app.values.set("vrcutil_hasUpdate", Status.Attention if latest_version != __version__ else "")
         except:
             pass
         finally:

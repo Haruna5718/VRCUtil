@@ -55,7 +55,7 @@
                             <Horizontal>
                                 <Vertical gap="0" align="left">
                                     <Horizontal gap="6px" align="center">
-                                        <Text>{vrcutil_modules[{i}][1]}</Text>
+                                        <Text url="{Object.values(vrcutil_modules[{i}][4][0])[0]}" color="var(--TextFillColorPrimaryBrush)">{vrcutil_modules[{i}][1]} </Text>
                                         <Text type="description">{vrcutil_modules[{i}][2]}</Text>
                                     </Horizontal>
                                     <Text type="description">{vrcutil_modules[{i}][3]}</Text>

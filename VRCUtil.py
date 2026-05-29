@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--overlay", nargs=2, metavar=("PORT", "KEY"))
 parser.add_argument("--debug", action="store_true")
 parser.add_argument("--minimize", action="store_true")
+parser.add_argument("--nogui", action="store_true")
 
 args = parser.parse_args()
 
@@ -25,7 +26,9 @@ if (args.overlay):
 # Single ========================================
 
 import ctypes
+import os
 import sys
+from pathlib import Path
 
 ERROR_ALREADY_EXISTS = 183
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -76,15 +79,91 @@ from Logger import open_log_window
 
 # Setting ========================================
 
-from vrcutil.core import VRCUtil, Module, logger
+import pystray
+import PIL.Image
 
-app = VRCUtil(WINDOW_NAME,"VRCUtil.ico")
+from vrcutil.core import VRCUtil, Module, logger
+from vrcutil.nogui import create_nogui_app
+
+app = create_nogui_app(WINDOW_NAME, "VRCUtil.ico", Path(__file__).parent) if args.nogui else VRCUtil(WINDOW_NAME, "VRCUtil.ico")
+window_runtime = app.api if args.nogui else app
+app.values.set("vrcutil_debug", args.debug, False)
+raw_window_destroy = window_runtime.destroy
+
+
+class VRCUtilTray:
+    def __init__(self, app: VRCUtil, no_gui: bool = False):
+        self.app = app
+        self.no_gui = bool(no_gui)
+        self.icon = None
+
+    def install(self) -> bool:
+        if self.icon is not None:
+            return True
+
+        icon_path = self.app.resolve_path(self.app.values.get("system_icon"))
+        if icon_path is None or not icon_path.exists():
+            return False
+
+        self.icon = pystray.Icon(
+            WINDOW_NAME,
+            PIL.Image.open(icon_path),
+            WINDOW_NAME,
+            pystray.Menu(*self._menu_items()),
+        )
+        threading.Thread(target=self.icon.run, daemon=True).start()
+        return True
+
+    def _menu_items(self):
+        if self.no_gui:
+            return (
+                pystray.MenuItem("Exit", self.exit_app),
+            )
+
+        return (
+            pystray.MenuItem("Open", self.open_window, default=True),
+            pystray.MenuItem("Exit", self.exit_app),
+        )
+
+    def uninstall(self):
+        if self.icon is None:
+            return
+        icon = self.icon
+        self.icon = None
+        try:
+            icon.visible = False
+        except Exception:
+            pass
+        icon.stop()
+
+    def set_enabled(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled:
+            self.install()
+        else:
+            self.uninstall()
+
+    def open_window(self, *_):
+        window_runtime.show()
+        window_runtime.restore()
+
+    def exit_app(self, *_):
+        target = terminate_process if self.no_gui else window_destroy
+        threading.Thread(target=target, daemon=True).start()
+
+tray = VRCUtilTray(app, no_gui=args.nogui)
+
+def bind_destroy(target):
+    window_runtime.destroy = target
+    js_api = getattr(app, "api", None) if window_runtime is app else None
+    if js_api is not None:
+        js_api.destroy = target
+
+def update_destroy_binding(enabled: bool):
+    bind_destroy(window_runtime.hide if bool(enabled) else window_destroy)
 
 from vrcutil import __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH, PACKAGES_PATH, IS_COMPILED, EXECUTABLE, registry, steam
 from vrcutil.file import SafeJson, BufferedJsonSaver
-import json
-import os
-from pathlib import Path
 
 import threading
 
@@ -148,6 +227,7 @@ with SafeJson(DATA_PATH/"Setting.json") as setting:
         "system_theme": "system",
         "system_window_width": 900,
         "system_window_height": 600,
+        "settings_useTray": True,
         "settings_osc_address": "127.0.0.1",
         "settings_osc_send": 9000,
         "settings_osc_receive": 0,
@@ -169,16 +249,47 @@ with SafeJson(DATA_PATH/"Setting.json") as setting:
     app.events.valueChange += ("settings_osc_send", initClient)
     app.events.valueChange += ("settings_osc_receive", initServer)
 
+def save_window_size():
+    if args.nogui:
+        return
+
+    try:
+        width, height = window_runtime.get_window_size()
+        width = int(width)
+        height = int(height)
+    except Exception:
+        logger.debug("Failed to capture window size", exc_info=True)
+        return
+
+    app.values.set("system_window_width", width, False)
+    app.values.set("system_window_height", height, False)
+
+    try:
+        with SafeJson(DATA_PATH/"Setting.json") as setting:
+            setting.data["system_window_width"] = width
+            setting.data["system_window_height"] = height
+            setting.save()
+    except Exception:
+        logger.debug("Failed to persist window size", exc_info=True)
+
+def window_destroy():
+    save_window_size()
+    raw_window_destroy()
+
 import urllib.request
 import subprocess
 import tempfile
 import shutil
 import importlib.util
 import site
+import json
 import traceback
 from concurrent.futures import ThreadPoolExecutor, wait
 
 from pywebwinui3.core import Status
+
+_cleanup_done = False
+_cleanup_lock = threading.Lock()
 
 _notified_update_version = None
 _update_check_lock = threading.Lock()
@@ -299,16 +410,16 @@ def bootstrapRuntime():
     app.start_process_monitor()
 
 GlobalTempDir = None
+_background_tasks_started = False
 
 @app.onValueChange("vrcutil_restart")
 def restart(*_):
-    CloseServices()
     subprocess.Popen(
         ["cmd", "/c", f"timeout /T 1 >nul & {EXECUTABLE}{' --debug' if args.debug else ''}"],
         cwd=INSTALL_PATH,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    app.api.destroy()
+    window_destroy()
 
 @app.onValueChange("vrcutil_removeModule_*")
 def removeModule(key, *_):
@@ -333,11 +444,24 @@ def removeModule(key, *_):
 
 @app.onSetup()
 def startBackgroundTasks():
+    global _background_tasks_started
+    if _background_tasks_started:
+        return
+    _background_tasks_started = True
     threading.Thread(target=updateCheckLoop, daemon=True).start()
 
-@app.onExit()
 def CloseServices():
+    global _cleanup_done
+    with _cleanup_lock:
+        if _cleanup_done:
+            return
+        _cleanup_done = True
+
     _update_check_stop.set()
+    try:
+        tray.uninstall()
+    except:
+        pass
     try:
         app.osc.stop()
     except:
@@ -355,17 +479,45 @@ def CloseServices():
             subprocess.Popen(["cmd", "/c", f"timeout /T 5 >nul & rmdir /S /Q {GlobalTempDir}"], creationflags=subprocess.CREATE_NO_WINDOW)
     except:
         pass
+    try:
+        CloseHandle(mutexHandle)
+    except Exception:
+        pass
+
+app.onExit()(CloseServices)
 
 @app.onValueChange("vrcutil_openLog")
 def openlog(*_):
     open_log_window()
 
-threading.Thread(target=bootstrapRuntime, daemon=True).start()
+@app.onValueChange("settings_useTray")
+def updateTray(*_, after=None):
+    if args.nogui:
+        return
+    enabled = bool(app.values.get("settings_useTray", True) if after is None else after)
+    tray.set_enabled(enabled)
+    update_destroy_binding(enabled)
 
-app.start(
-    debug = args.debug,
-    minimized = args.minimize,
-    onTop = app.values.get("system_pin", False),
-    min_width=800,
-    min_height=500,
-)
+threading.Thread(target=bootstrapRuntime, daemon=True).start()
+startBackgroundTasks()
+
+def terminate_process():
+    CloseServices()
+    os._exit(0)
+
+if args.nogui:
+    bind_destroy(terminate_process)
+    window_destroy = terminate_process
+    tray.set_enabled(True)
+    app.start(debug=args.debug)
+    threading.Event().wait()
+else:
+    tray_enabled = bool(app.values.get("settings_useTray", True))
+    tray.set_enabled(tray_enabled)
+    update_destroy_binding(tray_enabled)
+    app.start(
+        debug=args.debug,
+        hidden=tray_enabled and args.minimize,
+        width=app.values.get("system_window_width", 900),
+        height=app.values.get("system_window_height", 600),
+    )

@@ -23,6 +23,13 @@
     </Box>
     <Box>
         <Horizontal>
+            <Text> Use tray</Text>
+            <Space />
+            <Switch value="settings_useTray"/>
+        </Horizontal>
+    </Box>
+    <Box>
+        <Horizontal>
             <Text> OSC</Text>
             <Space />
             <Vertical gap="0" align="left">
@@ -87,13 +94,17 @@
             <Switch value="settings_checkUpdate"/>
         </Horizontal>
     </Box>
-    <Box>
-        <Horizontal>
-            <Text> Debug log</Text>
-            <Space />
-            <Button type="link" value="vrcutil_openLog">Open log</Button>
-        </Horizontal>
-    </Box>
+    <If data="{vrcutil_debug}">
+        <True>
+            <Box>
+                <Horizontal>
+                    <Text> Debug log</Text>
+                    <Space />
+                    <Button type="link" value="vrcutil_openLog">Open log</Button>
+                </Horizontal>
+            </Box>
+        </True>
+    </If>
     <Expender>
         <Header>
             <Horizontal>

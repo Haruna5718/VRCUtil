@@ -9,16 +9,116 @@ import threading
 import time
 from multiprocessing.connection import Client, Listener
 from multiprocessing import shared_memory
+from typing import Any, cast
 
 os.environ["PYOPENGL_USE_ACCELERATE"] = "0"
 
-import glfw
-import numpy as np
-import openvr
-from OpenGL.GL import GL_CLAMP_TO_EDGE, GL_LINEAR, GL_PIXEL_UNPACK_BUFFER, GL_RGBA, GL_STREAM_DRAW, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_MIN_FILTER, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE, glBindBuffer, glBindTexture, glBufferData, glBufferSubData, glDeleteBuffers, glDeleteTextures, glGenBuffers, glGenTextures, glPixelStorei, glTexImage2D, glTexParameteri, glTexSubImage2D
-from PIL import Image
-
 from . import INSTALL_PATH, IS_COMPILED
+
+_overlay_runtime_ready = False
+
+glfw = cast(Any, None)
+openvr = cast(Any, None)
+Image = cast(Any, None)
+
+GL_CLAMP_TO_EDGE = 0
+GL_LINEAR = 0
+GL_PIXEL_UNPACK_BUFFER = 0
+GL_RGBA = 0
+GL_STREAM_DRAW = 0
+GL_TEXTURE_2D = 0
+GL_TEXTURE_MAG_FILTER = 0
+GL_TEXTURE_MIN_FILTER = 0
+GL_TEXTURE_WRAP_S = 0
+GL_TEXTURE_WRAP_T = 0
+GL_UNPACK_ALIGNMENT = 0
+GL_UNSIGNED_BYTE = 0
+
+glBindBuffer = cast(Any, None)
+glBindTexture = cast(Any, None)
+glBufferData = cast(Any, None)
+glBufferSubData = cast(Any, None)
+glDeleteBuffers = cast(Any, None)
+glDeleteTextures = cast(Any, None)
+glGenBuffers = cast(Any, None)
+glGenTextures = cast(Any, None)
+glPixelStorei = cast(Any, None)
+glTexImage2D = cast(Any, None)
+glTexParameteri = cast(Any, None)
+glTexSubImage2D = cast(Any, None)
+
+
+def _ensure_overlay_runtime():
+	global _overlay_runtime_ready
+	if _overlay_runtime_ready:
+		return
+
+	global glfw, openvr, Image
+	global GL_CLAMP_TO_EDGE, GL_LINEAR, GL_PIXEL_UNPACK_BUFFER, GL_RGBA, GL_STREAM_DRAW
+	global GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_MIN_FILTER
+	global GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE
+	global glBindBuffer, glBindTexture, glBufferData, glBufferSubData
+	global glDeleteBuffers, glDeleteTextures, glGenBuffers, glGenTextures
+	global glPixelStorei, glTexImage2D, glTexParameteri, glTexSubImage2D
+
+	import glfw as imported_glfw
+	import openvr as imported_openvr
+	from OpenGL.GL import (
+		GL_CLAMP_TO_EDGE as imported_GL_CLAMP_TO_EDGE,
+		GL_LINEAR as imported_GL_LINEAR,
+		GL_PIXEL_UNPACK_BUFFER as imported_GL_PIXEL_UNPACK_BUFFER,
+		GL_RGBA as imported_GL_RGBA,
+		GL_STREAM_DRAW as imported_GL_STREAM_DRAW,
+		GL_TEXTURE_2D as imported_GL_TEXTURE_2D,
+		GL_TEXTURE_MAG_FILTER as imported_GL_TEXTURE_MAG_FILTER,
+		GL_TEXTURE_MIN_FILTER as imported_GL_TEXTURE_MIN_FILTER,
+		GL_TEXTURE_WRAP_S as imported_GL_TEXTURE_WRAP_S,
+		GL_TEXTURE_WRAP_T as imported_GL_TEXTURE_WRAP_T,
+		GL_UNPACK_ALIGNMENT as imported_GL_UNPACK_ALIGNMENT,
+		GL_UNSIGNED_BYTE as imported_GL_UNSIGNED_BYTE,
+		glBindBuffer as imported_glBindBuffer,
+		glBindTexture as imported_glBindTexture,
+		glBufferData as imported_glBufferData,
+		glBufferSubData as imported_glBufferSubData,
+		glDeleteBuffers as imported_glDeleteBuffers,
+		glDeleteTextures as imported_glDeleteTextures,
+		glGenBuffers as imported_glGenBuffers,
+		glGenTextures as imported_glGenTextures,
+		glPixelStorei as imported_glPixelStorei,
+		glTexImage2D as imported_glTexImage2D,
+		glTexParameteri as imported_glTexParameteri,
+		glTexSubImage2D as imported_glTexSubImage2D,
+	)
+	from PIL import Image as imported_Image
+
+	glfw = imported_glfw
+	openvr = imported_openvr
+	GL_CLAMP_TO_EDGE = imported_GL_CLAMP_TO_EDGE
+	GL_LINEAR = imported_GL_LINEAR
+	GL_PIXEL_UNPACK_BUFFER = imported_GL_PIXEL_UNPACK_BUFFER
+	GL_RGBA = imported_GL_RGBA
+	GL_STREAM_DRAW = imported_GL_STREAM_DRAW
+	GL_TEXTURE_2D = imported_GL_TEXTURE_2D
+	GL_TEXTURE_MAG_FILTER = imported_GL_TEXTURE_MAG_FILTER
+	GL_TEXTURE_MIN_FILTER = imported_GL_TEXTURE_MIN_FILTER
+	GL_TEXTURE_WRAP_S = imported_GL_TEXTURE_WRAP_S
+	GL_TEXTURE_WRAP_T = imported_GL_TEXTURE_WRAP_T
+	GL_UNPACK_ALIGNMENT = imported_GL_UNPACK_ALIGNMENT
+	GL_UNSIGNED_BYTE = imported_GL_UNSIGNED_BYTE
+	glBindBuffer = imported_glBindBuffer
+	glBindTexture = imported_glBindTexture
+	glBufferData = imported_glBufferData
+	glBufferSubData = imported_glBufferSubData
+	glDeleteBuffers = imported_glDeleteBuffers
+	glDeleteTextures = imported_glDeleteTextures
+	glGenBuffers = imported_glGenBuffers
+	glGenTextures = imported_glGenTextures
+	glPixelStorei = imported_glPixelStorei
+	glTexImage2D = imported_glTexImage2D
+	glTexParameteri = imported_glTexParameteri
+	glTexSubImage2D = imported_glTexSubImage2D
+	Image = imported_Image
+	_overlay_runtime_ready = True
 
 
 def _reserve_port() -> int:
@@ -186,6 +286,7 @@ class OpenGLManager:
                     pass
 
     def submit(self, image, overlay, overlay_handle: int | None, name: str = "Default", sync: bool = False):
+        _ensure_overlay_runtime()
         handle = overlay_handle if overlay_handle is not None else getattr(overlay, "overlay_handle", None)
         if handle is None:
             raise RuntimeError("Overlay is not initialized")
@@ -266,6 +367,7 @@ class Manager:
 
     @classmethod
     def openvr(cls):
+        _ensure_overlay_runtime()
         cls._client.start()
         cls._client.request("initialize")
 
@@ -435,6 +537,7 @@ class _OverlayServer:
         self.texture_shared_names: dict[str, str] = {}
 
     def initialize(self):
+        _ensure_overlay_runtime()
         if self._initialized:
             return
         openvr.init(openvr.VRApplication_Overlay)
@@ -444,6 +547,7 @@ class _OverlayServer:
         return True
 
     def _init_gl(self):
+        _ensure_overlay_runtime()
         if self.window is not None:
             return
         if not glfw.init():
@@ -651,7 +755,7 @@ class _OverlayServer:
         self._ensure_texture(key, tuple(size))
         shm = self._get_shared_memory(key, shared_name)
         self._ensure_pbo(key, byte_length)
-        glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, int(byte_length), np.frombuffer(shm.buf, dtype=np.uint8, count=int(byte_length)))
+        glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, int(byte_length), shm.buf[: int(byte_length)])
         glBindTexture(GL_TEXTURE_2D, self.texture_cache[key])
         glTexSubImage2D(
             GL_TEXTURE_2D,
@@ -673,6 +777,7 @@ class _OverlayServer:
         self.overlay.setOverlayTexture(overlay_handle, texture)
 
     def close(self):
+        _ensure_overlay_runtime()
         if self._initialized:
             for overlay_handle in tuple(self.overlays):
                 try:

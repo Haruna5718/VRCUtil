@@ -1,6 +1,7 @@
 PySide6
 pywin32
 pywebwinui3
+pystray
 python-osc
 pillow
 vdf
@@ -8,6 +9,5 @@ customtkinter
 zeroconf
 PyOpenGL
 glfw
-numpy
 openvr
 nuitka

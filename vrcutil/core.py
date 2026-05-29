@@ -5,8 +5,6 @@ import inspect
 import threading
 import traceback
 from contextlib import contextmanager
-
-from PySide6.QtCore import Qt
 import pywebwinui3.core
 import pywebwinui3.util
 import pywebwinui3.type
@@ -69,7 +67,6 @@ class RuntimeProcessStateManager:
 class VRCUtil(pywebwinui3.core.MainWindow):
     def __init__(self, title, icon):
         super().__init__(title, icon)
-        self.state_endpoint: str | None = None
         self.process_state = RuntimeProcessStateManager(self)
         self._opengl = None
         self._page_lock = threading.RLock()
@@ -307,16 +304,29 @@ class VRCUtil(pywebwinui3.core.MainWindow):
 
             self.values.set(value_key, state)
 
-    def start(self, debug=False, minimized=False, onTop=None, min_width=None, min_height=None):
+    def start(
+        self,
+        debug=False,
+        *,
+        hidden=False,
+        onTop=None,
+        width=None,
+        height=None,
+        min_width=800,
+        min_height=500,
+    ):
         if onTop is not None:
             self.values.set("system_pin", bool(onTop), False)
 
-        self.api.ensure_runtime(debug=debug)
-
-        if minimized and self.api._window is not None:
-            self.api._window.setWindowState(self.api._window.windowState() | Qt.WindowState.WindowMinimized)
-
-        super().start(debug, min_width, min_height)
+        super().start(
+            debug=debug,
+            hidden=hidden,
+            on_top=bool(self.values.get("system_pin", False)),
+            width=width,
+            height=height,
+            min_width=min_width,
+            min_height=min_height,
+        )
 
 
 class Module:

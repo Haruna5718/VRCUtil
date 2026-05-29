@@ -13,6 +13,9 @@ import tarfile
 import zipfile
 import zstandard as zstd
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+os.chdir(SCRIPT_DIR)
+
 
 def _rmtree_with_retry(path: Path | str, retries: int = 10, delay: float = 0.25, required: bool = False) -> bool:
 	path = Path(path)
@@ -584,9 +587,19 @@ if __name__ == "__main__":
 
 	VRCUtil.IncludeModuleData("PIL")
 	VRCUtil.IncludeModuleData("glfw")
-	VRCUtil.IncludeModuleData("OpenGL")
+	VRCUtil.IncludeFile(".venv/Lib/site-packages/OpenGL", "OpenGL")
+	VRCUtil.IncludeFile(".venv/Lib/site-packages/OpenGL_accelerate", "OpenGL_accelerate")
 	VRCUtil.IncludeModuleData("pywebwinui3")
 	VRCUtil.IncludeModuleData("customtkinter")
+
+	VRCUtil.IncludeModule("clr")
+	VRCUtil.IncludeModule("pythonnet")
+	VRCUtil.IncludeModule("clr_loader")
+	VRCUtil.IncludeModule("webview.guilib")
+	VRCUtil.IncludeModule("webview.platforms.win32")
+	VRCUtil.IncludeModule("webview.platforms.winforms")
+	VRCUtil.IncludeModule("webview.platforms.edgechromium")
+	VRCUtil.option.append("--disable-plugin=pywebview")
 
 	VRCUtil.IncludeFile("Dashboard.xaml")
 	VRCUtil.IncludeFile("Settings.xaml")
@@ -594,7 +607,6 @@ if __name__ == "__main__":
 	VRCUtil.IncludeFile(".venv/Lib/site-packages/openvr/libopenvr_api_32.dll", "openvr/libopenvr_api_32.dll")
 	VRCUtil.IncludeFile(".venv/Lib/site-packages/openvr/libopenvr_api_64.dll", "openvr/libopenvr_api_64.dll")
 
-	VRCUtil.AddPlugin(Nuitka.Plugin.PYSIDE6)
 	VRCUtil.AddPlugin(Nuitka.Plugin.TKINTER)
 
 	VRCUtil.Build(target)

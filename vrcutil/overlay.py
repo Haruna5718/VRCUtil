@@ -755,7 +755,13 @@ class _OverlayServer:
         self._ensure_texture(key, tuple(size))
         shm = self._get_shared_memory(key, shared_name)
         self._ensure_pbo(key, byte_length)
-        glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, int(byte_length), shm.buf[: int(byte_length)])
+        pixel_buffer_type = ctypes.c_ubyte * int(byte_length)
+        glBufferSubData(
+            GL_PIXEL_UNPACK_BUFFER,
+            0,
+            int(byte_length),
+            pixel_buffer_type.from_buffer(shm.buf),
+        )
         glBindTexture(GL_TEXTURE_2D, self.texture_cache[key])
         glTexSubImage2D(
             GL_TEXTURE_2D,

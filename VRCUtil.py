@@ -101,13 +101,9 @@ class VRCUtilTray:
         if self.icon is not None:
             return True
 
-        icon_path = self.app.resolve_path(self.app.values.get("system_icon"))
-        if icon_path is None or not icon_path.exists():
-            return False
-
         self.icon = pystray.Icon(
             WINDOW_NAME,
-            PIL.Image.open(icon_path),
+            PIL.Image.open(INSTALL_PATH / self.app.values.get("system_icon")),
             WINDOW_NAME,
             pystray.Menu(*self._menu_items()),
         )

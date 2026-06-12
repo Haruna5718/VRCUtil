@@ -592,6 +592,11 @@ if __name__ == "__main__":
 	VRCUtil.IncludeModuleData("pywebwinui3")
 	VRCUtil.IncludeModuleData("customtkinter")
 
+	VRCUtil.IncludeModule("vrcutil.event")
+	VRCUtil.IncludeModule("vrcutil.file")
+	VRCUtil.IncludeModule("vrcutil.osc")
+	VRCUtil.IncludeModule("vrcutil.overlay")
+
 	VRCUtil.IncludeModule("clr")
 	VRCUtil.IncludeModule("pythonnet")
 	VRCUtil.IncludeModule("clr_loader")

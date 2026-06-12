@@ -1,7 +1,6 @@
 import json
 import pathlib
 import logging
-import inspect
 import threading
 import traceback
 from contextlib import contextmanager
@@ -9,7 +8,7 @@ import pywebwinui3.core
 import pywebwinui3.util
 import pywebwinui3.type
 
-from . import event, file, osc, steam, wmi, __version__, INSTALL_PATH, DATA_PATH, MODULES_PATH
+from . import file, osc, steam, wmi, __version__, INSTALL_PATH, DATA_PATH, MODULES_PATH
 
 logger = logging.getLogger("vrcutil")
 
@@ -64,9 +63,16 @@ class RuntimeProcessStateManager:
     def _on_vrchat(self, _, state):
         self.app.syncProcessState({"vrchat": state})
 
+
 class VRCUtil(pywebwinui3.core.MainWindow):
     def __init__(self, title, icon):
         super().__init__(title, icon)
+        self._resource_roots.extend(
+            [
+                ("install", INSTALL_PATH.resolve()),
+                ("data", DATA_PATH.resolve()),
+            ]
+        )
         self.process_state = RuntimeProcessStateManager(self)
         self._opengl = None
         self._page_lock = threading.RLock()
@@ -92,25 +98,14 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         if path.is_absolute():
             return path
 
-        install_candidate = INSTALL_PATH / path
-        data_candidate = DATA_PATH / path
-        if data_candidate.exists():
-            return data_candidate.resolve()
-        if install_candidate.exists():
-            return install_candidate.resolve()
-        if data_candidate.parent.exists():
-            return data_candidate.resolve()
-        if install_candidate.parent.exists():
-            return install_candidate.resolve()
-
-        return super().resolve_path(value)
+        return INSTALL_PATH / path
 
     def __initVRCUtil__(self):
         self.Modules:dict[str,Module] = {}
 
         with self.batch_ui_sync():
-            self.addPage("Dashboard.xaml")
-            self.addSettings("Settings.xaml")
+            self.addPage(INSTALL_PATH / "Dashboard.xaml")
+            self.addSettings(INSTALL_PATH / "Settings.xaml")
 
             self.values.set("vrcutil_modules", [], False)
             self.values.set("vrcutil_version", __version__, False)
@@ -234,22 +229,6 @@ class VRCUtil(pywebwinui3.core.MainWindow):
             self._module_infos.pop(module_key, None)
         self._request_module_sync()
 
-    def addSettings(self, pageFile: str | pathlib.Path | None = None, pageData: dict | None = None):
-        if pageFile and not pageData:
-            pageData = pywebwinui3.util.loadPage(self.resolve_path(pageFile))
-        with self._page_lock:
-            result = super().addSettings(pageData=pageData)
-        self._request_page_sync()
-        return result
-
-    def addPage(self, pageFile: str | pathlib.Path | None = None, pageData: dict | None = None):
-        if pageFile and not pageData:
-            pageData = pywebwinui3.util.loadPage(self.resolve_path(pageFile))
-        with self._page_lock:
-            result = super().addPage(pageData=pageData)
-        self._request_page_sync()
-        return result
-
     def _schedule_overlay_sync(self, state: bool):
         with self._steamvr_overlay_lock:
             self._steamvr_overlay_pending = state
@@ -345,7 +324,7 @@ class Module:
         cls.__path__ = pathlib.Path(cls.__dict__['__init__'].__code__.co_filename).parent.name
 
     def __init_info__(self):
-        self.__info__:dict[str,str|list[dict[str,str]]] = json.loads(file.SafeRead(MODULES_PATH/self.__path__/"module.json"))
+        self.__info__:dict[str,str|list[dict[str,str]]] = json.loads(file.SafeRead(MODULES_PATH / self.__path__ / "module.json"))
         self.__name__:str|None                 = self.__info__.get("name")
         self.__version__:str|None              = self.__info__.get("version")
         self.__author__:str|None               = self.__info__.get("author")
@@ -394,7 +373,7 @@ class Module:
                 self.app.osc.addHandler(path, f"{callback.__name__}_{path}", callback)
 
     def __init_layout__(self):
-        if (layoutPath:=MODULES_PATH/self.__path__/"Layout.xaml").exists():
+        if (layoutPath:=MODULES_PATH / self.__path__ / "Layout.xaml").exists():
             try:
                 self.__layout__ = pywebwinui3.util.loadPage(layoutPath)
                 self.__layout__["attr"]["path"] = self.__path__
@@ -404,7 +383,7 @@ class Module:
                 self.app.notice(pywebwinui3.type.Status.Caution, f"Faild to load page {self.__name__}", str(e))
 
     def __init_widget__(self):
-        if (widgetPath:=MODULES_PATH/self.__path__/"Widget.xaml").exists():
+        if (widgetPath:=MODULES_PATH / self.__path__ / "Widget.xaml").exists():
             try:
                 self.__widget__ = pywebwinui3.util.loadPage(widgetPath)
                 self.app.add_module_widget(self.__widget__, self.__name__ or self.__path__, self.__path__)
@@ -424,11 +403,11 @@ class EasyModule(Module):
         super().__init__(app)
 
         if save:
-            self._valueSaver = file.BufferedJsonSaver(DATA_PATH/MODULES_PATH.name/self.__path__/"Setting.json")
+            self._valueSaver = file.BufferedJsonSaver(MODULES_PATH / self.__path__ / "Setting.json")
             self.__init_value_save__(save)
 
     def __init_value_load__(self, load:dict[str]):
-        with file.SafeOpen(DATA_PATH/MODULES_PATH.name/self.__path__/"Setting.json", "r+", touch=True) as f:
+        with file.SafeOpen(MODULES_PATH / self.__path__ / "Setting.json", "r+", touch=True) as f:
             try:
                 data = json.load(f)
             except:

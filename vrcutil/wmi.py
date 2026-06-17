@@ -3,7 +3,6 @@ import logging
 import os
 import pathlib
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from ctypes import wintypes
 

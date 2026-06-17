@@ -7,11 +7,13 @@ def hasProcessImage(imageName: str) -> bool:
 		["tasklist", "/FI", f"IMAGENAME eq {imageName}", "/FO", "CSV", "/NH"],
 		capture_output=True,
 		text=True,
+		encoding="utf-8",
+		errors="replace",
 		creationflags=subprocess.CREATE_NO_WINDOW,
 	)
 	if result.returncode != 0:
 		return False
-	for line in result.stdout.splitlines():
+	for line in (result.stdout or "").splitlines():
 		if not line or line.startswith("INFO:"):
 			continue
 		row = next(csv.reader([line]), None)
@@ -32,6 +34,8 @@ def closeProcessImage(imageName: str) -> tuple[bool, bool]:
 			command,
 			capture_output=True,
 			text=True,
+			encoding="utf-8",
+			errors="replace",
 			creationflags=subprocess.CREATE_NO_WINDOW,
 		)
 		if not hasProcessImage(imageName):

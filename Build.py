@@ -210,11 +210,14 @@ class Nuitka:
 		self.console = console
 		self.needAdmin = needAdmin
 		self.cache = cache
+		self.version = None
+		self.product = None
+		self.company = None
+		self.copyright = None
+		self.description = None
 
 		if self.icon:
 			self.IncludeFile(self.icon)
-
-		self.SetInformation(None)
 
 	@property
 	def command(self) -> list[str]:
@@ -223,6 +226,8 @@ class Nuitka:
 
 		option.append(f"--jobs={os.cpu_count():.0f}")
 		option.append(f"--assume-yes-for-downloads")
+		if os.name == "nt":
+			option.append("--msvc=latest")
 		if not self.cache:
 			option.append("--remove-output")
 

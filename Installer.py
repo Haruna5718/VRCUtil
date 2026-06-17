@@ -3,9 +3,9 @@ import sys
 if "debug" in sys.argv:
 	import ctypes
 	ctypes.windll.kernel32.AllocConsole()
-	sys.stdout = open("CONOUT$", "w")
-	sys.stderr = open("CONOUT$", "w")
-	sys.stdin  = open("CONIN$", "r")
+	sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+	sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+	sys.stdin  = open("CONIN$", "r", encoding="utf-8", errors="replace")
 
 import os
 import time
@@ -28,8 +28,6 @@ from pywebwinui3.type import Status
 from vrcutil import registry, steam, __version__, IS_COMPILED, tkinter
 from vrcutil.process import closeProcessImage
 
-if not IS_COMPILED:
-    rootPath = Path("./")
 rootPath = Path(__file__).resolve().parent
 
 def createShortcut(target:str|Path,outPath:str|Path):
@@ -50,6 +48,15 @@ def createShortcut(target:str|Path,outPath:str|Path):
 
 def closeRunningVRCUtil() -> tuple[bool, bool]:
     return closeProcessImage("VRCUtil.exe")
+
+def launchVRCUtil(installPath:Path):
+    subprocess.Popen(
+        [installPath/"VRCUtil.exe"],
+        cwd=installPath,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
 
 class MainWindow(tkinter.App):
     def __init__(self, title:str, size:list[int], icon: str|Path, resize:bool=True):
@@ -240,7 +247,7 @@ class InstallPage(tkinter.Page):
             self.message.configure(text=f'Installed VRCUtil {__version__}')
             
             if self.master.autoLaunch.value and IS_COMPILED:
-                subprocess.Popen([self.master.installPath/"VRCUtil.exe"], cwd=self.master.installPath)
+                launchVRCUtil(self.master.installPath)
                 self.master.autoLaunch.configure(state="disabled")
             else:
                 self.master.autoLaunch.configure(text="Launch VRCUtil")
@@ -297,7 +304,7 @@ class InstallPage(tkinter.Page):
 
     def close(self, _):
         if self.master.autoLaunch.value and IS_COMPILED:
-            subprocess.Popen([self.master.installPath/"VRCUtil.exe"], cwd=self.master.installPath)
+            launchVRCUtil(self.master.installPath)
         sys.exit(0)
 
 app = MainWindow("VRCUtil Installer", [500, 300], rootPath/"VRCUtil.ico", False)

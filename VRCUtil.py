@@ -463,10 +463,6 @@ def CloseServices():
     except:
         pass
     try:
-        ctypes.windll.kernel32.CloseHandle(mutexHandle)
-    except:
-        pass
-    try:
         app.stop_process_monitor()
     except:
         pass

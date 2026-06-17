@@ -9,9 +9,9 @@ if __name__ == "__main__":
     if "debug" in sys.argv:
         import ctypes
         ctypes.windll.kernel32.AllocConsole()
-        sys.stdout = open("CONOUT$", "w")
-        sys.stderr = open("CONOUT$", "w")
-        sys.stdin  = open("CONIN$", "r")
+        sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+        sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+        sys.stdin  = open("CONIN$", "r", encoding="utf-8", errors="replace")
 
     import json
     import os
@@ -22,12 +22,11 @@ if __name__ == "__main__":
     import threading
     import webbrowser
     import subprocess
-    import ctypes
     import customtkinter
 
     from pywebwinui3.type import Status
 
-    from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH, PACKAGES_PATH, IS_COMPILED
+    from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH, PACKAGES_PATH
     from vrcutil.process import closeProcessImage
 
     def preserve_module_setting(previous_path: pathlib.Path, current_path: pathlib.Path):
@@ -67,6 +66,8 @@ if __name__ == "__main__":
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             creationflags=subprocess.CREATE_NO_WINDOW,
             bufsize=1,
@@ -125,7 +126,7 @@ if __name__ == "__main__":
             
             for data in installData["urls"]:
                 name, url = list(data.items())[0]
-                tkinter.Button(self.frame, self.acm, text=name, width=0, callback=lambda: webbrowser.open(url), color=Status.Attention).pack(padx=(5, 0), side="right")
+                tkinter.Button(self.frame, self.acm, text=name, width=0, callback=lambda _, url=url: webbrowser.open(url), color=Status.Attention).pack(padx=(5, 0), side="right")
 
             self.description = tkinter.Textbox(self, font=customtkinter.CTkFont(size=14), readonly=True)
             self.description.grid(row=2, padx=10, pady=10, sticky="nsew")
@@ -158,7 +159,6 @@ if __name__ == "__main__":
             backupModulePath = None
             backupPackagePath = None
             movedPackages = []
-            replacedPackages = []
             moduleSwapped = False
             try:
                 installPath = MODULES_PATH/f'{installData["path"]}'
@@ -213,7 +213,6 @@ if __name__ == "__main__":
                         backupTargetPath = backupPackagePath / packagePath.name
                         backupTargetPath.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(targetPath), str(backupTargetPath))
-                        replacedPackages.append(packagePath.name)
                     shutil.move(str(packagePath), str(targetPath))
                     movedPackages.append(packagePath.name)
 

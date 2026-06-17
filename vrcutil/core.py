@@ -98,7 +98,20 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         if path.is_absolute():
             return path
 
-        return INSTALL_PATH / path
+        if path.parts and path.parts[0] == "Modules":
+            data_path = DATA_PATH / path
+            if data_path.exists():
+                return data_path.resolve()
+
+        install_path = INSTALL_PATH / path
+        if install_path.exists():
+            return install_path.resolve()
+
+        data_path = DATA_PATH / path
+        if data_path.exists():
+            return data_path.resolve()
+
+        return install_path.resolve()
 
     def __initVRCUtil__(self):
         self.Modules:dict[str,Module] = {}

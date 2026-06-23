@@ -6,7 +6,7 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(1)
 
-    if "debug" in sys.argv:
+    if "--debug" in sys.argv:
         import ctypes
         ctypes.windll.kernel32.AllocConsole()
         sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
@@ -27,6 +27,7 @@ if __name__ == "__main__":
     from pywebwinui3.type import Status
 
     from vrcutil import tkinter, MODULES_PATH, INSTALL_PATH, PACKAGES_PATH
+    from vrcutil.hook import invoke_module_hook
     from vrcutil.process import closeProcessImage
 
     def preserve_module_setting(previous_path: pathlib.Path, current_path: pathlib.Path):
@@ -215,6 +216,17 @@ if __name__ == "__main__":
                         shutil.move(str(targetPath), str(backupTargetPath))
                     shutil.move(str(packagePath), str(targetPath))
                     movedPackages.append(packagePath.name)
+
+                invoke_module_hook(
+                    installPath,
+                    "install",
+                    module_name=installData["name"],
+                    module_id=installData["path"],
+                    install_data=installData,
+                    install_root=INSTALL_PATH,
+                    packages_path=PACKAGES_PATH,
+                    log=lambda message: self.installLog.write(f"\n{message}") if str(message or "").strip() else None,
+                )
 
                 self.progress.config(Status.Success)
                 self.button.config(True,"Launch VRCUtil")

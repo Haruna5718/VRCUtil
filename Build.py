@@ -335,8 +335,13 @@ class Nuitka:
 class CodeSign:
 	_signtool_path = None
 	_timestamp_url = "http://timestamp.digicert.com"
-	def __init__(self, name:str):
-		self.thumbprint = subprocess.run(
+	def __init__(self, name:str, cert_root: Path | None = None):
+		self.name = name
+		self.cert_root = Path(cert_root or SCRIPT_DIR).resolve()
+		self.cert_root.mkdir(parents=True, exist_ok=True)
+		self.cert_path = self.cert_root / f"{name}.cer"
+
+		run_result = subprocess.run(
 			[
 				"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
 				"-NoProfile",
@@ -344,7 +349,10 @@ class CodeSign:
 				"Bypass",
 				"-Command",
 				f"""
-					$subject = 'CN={name}'
+					$subject = 'CN={name.replace("'", "''")}'
+					$certPath = '{str(self.cert_path).replace("'", "''")}'
+					$certDir = Split-Path -Parent $certPath
+					New-Item -ItemType Directory -Path $certDir -Force | Out-Null
 					$now = Get-Date
 					$desiredNotAfter = $now.AddYears(100)
 					$minimumAcceptableNotAfter = $now.AddYears(50)
@@ -352,20 +360,22 @@ class CodeSign:
 						Where-Object {{ $_.Subject -eq $subject }} |
 						Sort-Object NotAfter -Descending |
 						Select-Object -First 1
-					if (-not $cert -or $cert.NotAfter -lt $minimumAcceptableNotAfter) {{
+					if (-not $cert) {{
 						$cert = New-SelfSignedCertificate -Subject $subject -Type CodeSigning -CertStoreLocation 'Cert:\\CurrentUser\\My' -HashAlgorithm 'SHA256' -NotAfter $desiredNotAfter
-						$cerPath = Join-Path $env:TEMP 'VRCUtil.cer'
-						Export-Certificate -Cert $cert -FilePath $cerPath -Force | Out-Null
-						Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\\CurrentUser\\TrustedPublisher' | Out-Null
-						Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null
-						Remove-Item $cerPath -Force -ErrorAction SilentlyContinue
 					}}
+					if ($cert.NotAfter -lt $minimumAcceptableNotAfter) {{
+						$cert = New-SelfSignedCertificate -Subject $subject -Type CodeSigning -CertStoreLocation 'Cert:\\CurrentUser\\My' -HashAlgorithm 'SHA256' -NotAfter $desiredNotAfter
+					}}
+					Export-Certificate -Cert $cert -FilePath $certPath -Force | Out-Null
+					Import-Certificate -FilePath $certPath -CertStoreLocation 'Cert:\\CurrentUser\\TrustedPublisher' | Out-Null
+					Import-Certificate -FilePath $certPath -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null
 					$cert.Thumbprint
 				""".strip(),
 			],
 			check=True,
 			capture_output=True,
-		).stdout.strip()
+		)
+		self.thumbprint = run_result.stdout.decode().strip()
 
 	@staticmethod
 	def _FindSignTool() -> Path:
@@ -569,7 +579,7 @@ if __name__ == "__main__":
 	# ========================================
 
 	target = Path("build/VRCUtil").resolve()
-	Signer = CodeSign("VRCUtil")
+	Signer = CodeSign("VRCUtil", SCRIPT_DIR)
 	shutil.rmtree(target, ignore_errors=True)
 
 	# ========================================

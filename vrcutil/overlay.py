@@ -127,8 +127,8 @@ def _reserve_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _host_command(port: int, key: str) -> list[str]:
-    args = [f"--overlay", f"{port}", f"{key}"]
+def _host_command(port: int) -> list[str]:
+    args = [f"--overlay", f"{port}"]
     if not IS_COMPILED:
         return [sys.executable, str(INSTALL_PATH / "VRCUtil.py"), *args]
     return [str(INSTALL_PATH / "VRCUtil.exe"), *args]
@@ -144,14 +144,41 @@ def _host_startupinfo():
 
 class _OverlayProcessClient:
     SHUTDOWN_WAIT = 0.4
-    KILL_WAIT = 0.4
+    KILL_WAIT = 0.1
 
     def __init__(self):
         self._connection = None
         self._process = None
+        self._port = None
+        self._disabled = False
         self._lock = threading.RLock()
 
-    def _connect(self, port: int, key: bytes):
+    def _cleanup_stray_processes(self, port: int | None):
+        if os.name != "nt" or port is None:
+            return
+
+        token = f"--overlay {int(port)}"
+        escaped_token = token.replace("'", "''")
+        script = (
+            f"$token = '{escaped_token}';"
+            f"$selfPid = {os.getpid()};"
+            "Get-CimInstance Win32_Process | "
+            "Where-Object { $_.CommandLine -like ('*' + $token + '*') -and $_.ProcessId -ne $PID -and $_.ProcessId -ne $selfPid } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        try:
+            subprocess.run(
+                ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except OSError:
+            pass
+
+    def _connect(self, port: int):
         deadline = time.time() + 10.0
         last_error = None
 
@@ -161,7 +188,7 @@ class _OverlayProcessClient:
                     f"Overlay host exited before accepting a connection (exit code {self._process.returncode})"
                 ) from last_error
             try:
-                return Client(("127.0.0.1", port), authkey=key)
+                return Client(("127.0.0.1", port))
             except OSError as exc:
                 last_error = exc
                 time.sleep(0.1)
@@ -172,19 +199,19 @@ class _OverlayProcessClient:
         with self._lock:
             if self._connection is not None:
                 return
+            if self._disabled:
+                raise RuntimeError("Overlay host startup is disabled")
             port = _reserve_port()
-            key_text = secrets.token_hex(32)
-            key = key_text.encode("ascii")
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            self._port = port
             self._process = subprocess.Popen(
-                _host_command(port, key_text),
-                creationflags=creationflags,
+                _host_command(port),
+                creationflags=subprocess.CREATE_NO_WINDOW,
                 cwd=INSTALL_PATH,
                 startupinfo=_host_startupinfo(),
             )
 
             try:
-                self._connection = self._connect(port, key)
+                self._connection = self._connect(port)
             except Exception:
                 self.stop(request_shutdown=False)
                 raise
@@ -212,12 +239,16 @@ class _OverlayProcessClient:
                 self.stop(request_shutdown=False)
                 raise
 
-    def stop(self, request_shutdown: bool = True):
+    def stop(self, request_shutdown: bool = True, disable: bool = False, immediate: bool = False):
         with self._lock:
+            if disable:
+                self._disabled = True
             connection = self._connection
             process = self._process
+            port = self._port
             self._connection = None
             self._process = None
+            self._port = None
 
             if connection is not None:
                 try:
@@ -231,17 +262,57 @@ class _OverlayProcessClient:
                     pass
 
             if process is not None:
-                try:
-                    process.wait(timeout=self.SHUTDOWN_WAIT)
-                except subprocess.TimeoutExpired:
-                    try:
-                        process.kill()
-                    except OSError:
-                        pass
+                if immediate:
+                    if os.name == "nt":
+                        try:
+                            subprocess.run(
+                                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                check=False,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                            )
+                        except OSError:
+                            pass
+                    else:
+                        try:
+                            process.kill()
+                        except OSError:
+                            pass
                     try:
                         process.wait(timeout=self.KILL_WAIT)
                     except subprocess.TimeoutExpired:
                         pass
+                else:
+                    try:
+                        process.wait(timeout=self.SHUTDOWN_WAIT)
+                    except subprocess.TimeoutExpired:
+                        if os.name == "nt":
+                            try:
+                                subprocess.run(
+                                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                    check=False,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    creationflags=subprocess.CREATE_NO_WINDOW,
+                                )
+                            except OSError:
+                                pass
+                        else:
+                            try:
+                                process.kill()
+                            except OSError:
+                                pass
+                        try:
+                            process.wait(timeout=self.KILL_WAIT)
+                        except subprocess.TimeoutExpired:
+                            pass
+
+            self._cleanup_stray_processes(port)
+
+    def set_disabled(self, disabled: bool):
+        with self._lock:
+            self._disabled = bool(disabled)
 
 
 class OpenGLManager:
@@ -380,8 +451,20 @@ class Manager:
         cls._client.post(command, **payload)
 
     @classmethod
-    def stop(cls):
-        cls._client.stop()
+    def stop(cls, immediate: bool = False):
+        cls._client.stop(immediate=immediate)
+
+    @classmethod
+    def suspend(cls):
+        cls._client.set_disabled(True)
+
+    @classmethod
+    def shutdown(cls, immediate: bool = False):
+        cls._client.stop(disable=True, immediate=immediate)
+
+    @classmethod
+    def resume(cls):
+        cls._client.set_disabled(False)
 
 
 class VROverlay:
@@ -505,7 +588,10 @@ class VROverlay:
     def stop(self):
         if self.overlay_handle is not None:
             try:
-                Manager.request("destroy_overlay", overlay_handle=self.overlay_handle)
+                try:
+                    Manager.request("destroy_overlay", overlay_handle=self.overlay_handle)
+                except Exception:
+                    pass
             finally:
                 if hasattr(self, "opengl") and self.opengl is not None:
                     try:
@@ -519,7 +605,7 @@ class VROverlay:
                 self._requested_visible = None
 
 
-class _OverlayServer:
+class OverlayServer:
     def __init__(self):
         self.vr = None
         self.overlay = None
@@ -813,8 +899,8 @@ class _OverlayServer:
         if self._initialized:
             openvr.shutdown()
 
-    def serve(self, port: int, key: str):
-        listener = Listener(("127.0.0.1", port), authkey=key.encode("ascii"))
+    def serve(self, port: int):
+        listener = Listener(("127.0.0.1", port))
         try:
             connection = listener.accept()
             with connection:

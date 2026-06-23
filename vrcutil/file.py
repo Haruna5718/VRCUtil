@@ -1,11 +1,60 @@
 import json
 import time
 import msvcrt
+import ctypes
 import pathlib
-import win32con
 import threading
 import functools
-import win32file
+import os
+from ctypes import wintypes
+
+if os.name == "nt":
+	_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+	_CreateFileW = _kernel32.CreateFileW
+	_CreateFileW.argtypes = [
+		wintypes.LPCWSTR,
+		wintypes.DWORD,
+		wintypes.DWORD,
+		wintypes.LPVOID,
+		wintypes.DWORD,
+		wintypes.DWORD,
+		wintypes.HANDLE,
+	]
+	_CreateFileW.restype = wintypes.HANDLE
+
+	_ReadFile = _kernel32.ReadFile
+	_ReadFile.argtypes = [
+		wintypes.HANDLE,
+		wintypes.LPVOID,
+		wintypes.DWORD,
+		ctypes.POINTER(wintypes.DWORD),
+		wintypes.LPVOID,
+	]
+	_ReadFile.restype = wintypes.BOOL
+
+	_SetFilePointerEx = _kernel32.SetFilePointerEx
+	_SetFilePointerEx.argtypes = [
+		wintypes.HANDLE,
+		ctypes.c_longlong,
+		ctypes.POINTER(ctypes.c_longlong),
+		wintypes.DWORD,
+	]
+	_SetFilePointerEx.restype = wintypes.BOOL
+
+	_GetFileSizeEx = _kernel32.GetFileSizeEx
+	_GetFileSizeEx.argtypes = [wintypes.HANDLE, ctypes.POINTER(ctypes.c_longlong)]
+	_GetFileSizeEx.restype = wintypes.BOOL
+
+	_CloseHandle = _kernel32.CloseHandle
+	_CloseHandle.argtypes = [wintypes.HANDLE]
+	_CloseHandle.restype = wintypes.BOOL
+
+	_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+	_GENERIC_READ = 0x80000000
+	_FILE_SHARE_READ = 0x00000001
+	_FILE_SHARE_WRITE = 0x00000002
+	_OPEN_EXISTING = 3
+	_FILE_BEGIN = 0
 
 class SafeOpen:
 	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=False, timeout=None, attempts=None, interval=0.01):
@@ -67,27 +116,52 @@ class SafeOpen:
 	def __getattr__(self, name):
 		return getattr(self.file, name)
 
-def SafeRead(path: str|pathlib.Path) -> str:
-	handle = None
+def _read_shared_bytes(path: str | pathlib.Path, offset: int = 0) -> bytes:
+	if os.name != "nt":
+		with open(path, "rb") as f:
+			f.seek(offset)
+			return f.read()
+
+	handle = _CreateFileW(
+		str(path),
+		_GENERIC_READ,
+		_FILE_SHARE_READ | _FILE_SHARE_WRITE,
+		None,
+		_OPEN_EXISTING,
+		0,
+		None,
+	)
+	if handle == _INVALID_HANDLE_VALUE:
+		raise ctypes.WinError(ctypes.get_last_error())
+
 	try:
-		handle = win32file.CreateFile(
-			str(path),
-			win32con.GENERIC_READ,
-			win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE,
-			None,
-			win32con.OPEN_EXISTING,
-			0,
-			None
-		)
-		try:
-			win32file.SetFilePointer(handle, 0, win32file.FILE_BEGIN)
-			return win32file.ReadFile(handle, win32file.GetFileSize(handle))[1].decode("utf-8", errors="ignore")
-		except:
-			win32file.SetFilePointer(handle, 1, win32file.FILE_BEGIN)
-			return win32file.ReadFile(handle, win32file.GetFileSize(handle))[1].decode("utf-8", errors="ignore")
+		size = ctypes.c_longlong()
+		if not _GetFileSizeEx(handle, ctypes.byref(size)):
+			raise ctypes.WinError(ctypes.get_last_error())
+		if offset and not _SetFilePointerEx(handle, offset, None, _FILE_BEGIN):
+			raise ctypes.WinError(ctypes.get_last_error())
+
+		length = max(0, int(size.value) - int(offset))
+		if length <= 0:
+			return b""
+
+		buffer = ctypes.create_string_buffer(length)
+		read = wintypes.DWORD()
+		if not _ReadFile(handle, buffer, length, ctypes.byref(read), None):
+			raise ctypes.WinError(ctypes.get_last_error())
+		return buffer.raw[: read.value]
 	finally:
-		if handle:
-			win32file.CloseHandle(handle)
+		_CloseHandle(handle)
+
+def SafeRead(path: str|pathlib.Path) -> str:
+	path = pathlib.Path(path)
+	try:
+		return _read_shared_bytes(path, 0).decode("utf-8", errors="ignore")
+	except Exception as first_error:
+		try:
+			return _read_shared_bytes(path, 1).decode("utf-8", errors="ignore")
+		except Exception:
+			raise first_error
 
 class SafeJson(SafeOpen):
 	def __init__(self, path, mode="r+", encoding="utf-8", wait=True, touch=True, timeout=None, attempts=None, interval=0.01):

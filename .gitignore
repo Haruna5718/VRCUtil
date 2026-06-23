@@ -8,3 +8,5 @@ Modules/
 Setting.json
 
 .vscode/
+
+*.cer

@@ -4,10 +4,220 @@ import pathlib
 import datetime
 import logging
 import os
+import base64
+import subprocess
 
 from . import APP_ID
 
 logger = logging.getLogger("vrcutil.registry")
+
+
+_CREATE_SHORTCUT_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+
+$shortcutPath = [System.IO.Path]::GetFullPath($env:VRCUTIL_SHORTCUT_PATH)
+$targetPath = [System.IO.Path]::GetFullPath($env:VRCUTIL_SHORTCUT_TARGET)
+$arguments = $env:VRCUTIL_SHORTCUT_ARGUMENTS
+$iconPath = $env:VRCUTIL_SHORTCUT_ICON
+
+if ([string]::IsNullOrWhiteSpace($iconPath)) {
+    $iconPath = $targetPath
+} else {
+    $iconPath = [System.IO.Path]::GetFullPath($iconPath)
+}
+
+$parent = [System.IO.Path]::GetDirectoryName($shortcutPath)
+if (-not [string]::IsNullOrWhiteSpace($parent)) {
+    [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+}
+
+$shell = $null
+$shortcut = $null
+
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = $targetPath
+    $shortcut.Arguments = $arguments
+    $shortcut.WorkingDirectory = [System.IO.Path]::GetDirectoryName($targetPath)
+    $shortcut.IconLocation = $iconPath
+    $shortcut.Save()
+}
+finally {
+    if ($shortcut -ne $null) {
+        [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut)
+    }
+    if ($shell -ne $null) {
+        [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)
+    }
+}
+"""
+
+
+_SET_SHORTCUT_APPID_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public struct PROPERTYKEY
+{
+    public Guid fmtid;
+    public uint pid;
+
+    public PROPERTYKEY(Guid formatId, uint propertyId)
+    {
+        fmtid = formatId;
+        pid = propertyId;
+    }
+}
+
+[StructLayout(LayoutKind.Explicit)]
+public struct PROPVARIANTUNION
+{
+    [FieldOffset(0)]
+    public IntPtr pwszVal;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct PROPVARIANT
+{
+    public ushort vt;
+    public ushort wReserved1;
+    public ushort wReserved2;
+    public ushort wReserved3;
+    public PROPVARIANTUNION data;
+
+    public static PROPVARIANT FromString(string value)
+    {
+        var variant = new PROPVARIANT();
+        variant.vt = 31;
+        variant.data.pwszVal = Marshal.StringToCoTaskMemUni(value);
+        return variant;
+    }
+
+    public void Clear()
+    {
+        PropVariantClear(ref this);
+    }
+
+    [DllImport("ole32.dll")]
+    private static extern int PropVariantClear(ref PROPVARIANT pvar);
+}
+
+[ComImport]
+[Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IPropertyStore
+{
+    uint GetCount(out uint cProps);
+    uint GetAt(uint iProp, out PROPERTYKEY pkey);
+    uint GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+    uint SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+    uint Commit();
+}
+
+public static class ShortcutPropertyStore
+{
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    private static extern void SHGetPropertyStoreFromParsingName(
+        string pszPath,
+        IntPtr zero,
+        uint flags,
+        ref Guid riid,
+        [Out, MarshalAs(UnmanagedType.Interface)] out IPropertyStore propertyStore
+    );
+
+    public static void SetAppUserModelId(string shortcutPath, string appId)
+    {
+        var iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+        IPropertyStore store;
+        SHGetPropertyStoreFromParsingName(shortcutPath, IntPtr.Zero, 2, ref iid, out store);
+
+        var key = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
+        var value = PROPVARIANT.FromString(appId);
+
+        try
+        {
+            store.SetValue(ref key, ref value);
+            store.Commit();
+        }
+        finally
+        {
+            value.Clear();
+            if (store != null)
+            {
+                Marshal.ReleaseComObject(store);
+            }
+        }
+    }
+}
+"@
+
+$shortcutPath = [System.IO.Path]::GetFullPath($env:VRCUTIL_SHORTCUT_PATH)
+$appId = $env:VRCUTIL_SHORTCUT_APPID
+
+if (Test-Path -LiteralPath $shortcutPath) {
+    [ShortcutPropertyStore]::SetAppUserModelId($shortcutPath, $appId)
+}
+"""
+
+
+def _run_powershell(script: str, env_updates: dict[str, str | pathlib.Path | None]):
+    env = os.environ.copy()
+    for key, value in env_updates.items():
+        env[key] = "" if value is None else str(value)
+
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if result.returncode == 0:
+        return
+
+    message = (result.stderr or result.stdout).strip() or f"PowerShell exited with code {result.returncode}"
+    raise RuntimeError(message)
+
+
+def createShortcut(
+    shortcutPath: str | pathlib.Path,
+    target: str | pathlib.Path,
+    arguments: str = "",
+    icon: str | pathlib.Path | None = None,
+    appId: str | None = APP_ID,
+):
+    shortcutPath = pathlib.Path(shortcutPath)
+    target = pathlib.Path(target).resolve()
+    shortcutPath.parent.mkdir(parents=True, exist_ok=True)
+
+    _run_powershell(
+        _CREATE_SHORTCUT_SCRIPT,
+        {
+            "VRCUTIL_SHORTCUT_PATH": shortcutPath,
+            "VRCUTIL_SHORTCUT_TARGET": target,
+            "VRCUTIL_SHORTCUT_ARGUMENTS": arguments or "",
+            "VRCUTIL_SHORTCUT_ICON": icon or target,
+        },
+    )
+
+    if appId:
+        setShortcutAppId(shortcutPath, appId)
 
 
 def setShortcutAppId(shortcutPath:str|pathlib.Path, appId:str=APP_ID):
@@ -15,16 +225,13 @@ def setShortcutAppId(shortcutPath:str|pathlib.Path, appId:str=APP_ID):
     if not shortcutPath.exists():
         return
     try:
-        from win32com.propsys import propsys, pscon
-        from win32com.shell import shellcon
-        store = propsys.SHGetPropertyStoreFromParsingName(
-            str(shortcutPath),
-            None,
-            shellcon.GPS_READWRITE,
-            propsys.IID_IPropertyStore,
+        _run_powershell(
+            _SET_SHORTCUT_APPID_SCRIPT,
+            {
+                "VRCUTIL_SHORTCUT_PATH": shortcutPath,
+                "VRCUTIL_SHORTCUT_APPID": appId,
+            },
         )
-        store.SetValue(pscon.PKEY_AppUserModel_ID, propsys.PROPVARIANTType(str(appId)))
-        store.Commit()
     except Exception:
         logger.debug("Failed to set AppUserModelID for shortcut %s", shortcutPath, exc_info=True)
 
@@ -173,25 +380,9 @@ class Program:
 
     @staticmethod
     def setStartupShortcut(name:str, target:str|pathlib.Path, arguments:str="", icon:str|pathlib.Path=None):
-        import pythoncom
-        from win32com.client import Dispatch
-
         target = pathlib.Path(target).resolve()
         shortcut_path = Program.startupShortcutPath(name)
-        shortcut_path.parent.mkdir(parents=True, exist_ok=True)
-
-        pythoncom.CoInitialize()
-        try:
-            shell = Dispatch("WScript.Shell")
-            shortcut = shell.CreateShortcut(str(shortcut_path))
-            shortcut.TargetPath = str(target)
-            shortcut.Arguments = str(arguments or "")
-            shortcut.WorkingDirectory = str(target.parent)
-            shortcut.IconLocation = str(icon or target)
-            shortcut.Save()
-            setShortcutAppId(shortcut_path)
-        finally:
-            pythoncom.CoUninitialize()
+        createShortcut(shortcut_path, target, arguments=str(arguments or ""), icon=icon or target)
 
         logger.info(f"Startup shortcut registed: {name} {target} {arguments}")
 

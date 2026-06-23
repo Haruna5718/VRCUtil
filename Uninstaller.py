@@ -193,7 +193,7 @@ class UninstallPage(tkinter.Page):
 
 if __name__ == "__main__":
 	
-	if "debug" in sys.argv:
+	if "--debug" in sys.argv:
 		import ctypes
 		ctypes.windll.kernel32.AllocConsole()
 		sys.stdout = open("CONOUT$", "w")

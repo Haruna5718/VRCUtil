@@ -1,6 +1,6 @@
 import sys
 
-if "debug" in sys.argv:
+if "--debug" in sys.argv:
 	import ctypes
 	ctypes.windll.kernel32.AllocConsole()
 	sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
@@ -19,9 +19,7 @@ import tarfile
 import zstandard as zstd
 from pathlib import Path
 import customtkinter
-import pythoncom
 from PIL import Image
-from win32com.client import Dispatch
 
 from pywebwinui3.type import Status
 
@@ -29,22 +27,6 @@ from vrcutil import registry, steam, __version__, IS_COMPILED, tkinter
 from vrcutil.process import closeProcessImage
 
 rootPath = Path(__file__).resolve().parent
-
-def createShortcut(target:str|Path,outPath:str|Path):
-    target = Path(target).resolve()
-    outPath = Path(outPath).resolve()
-    outPath.parent.mkdir(parents=True, exist_ok=True)
-    pythoncom.CoInitialize()
-    try:
-        shell = Dispatch("WScript.Shell")
-        shortcut = shell.CreateShortcut(str(outPath))
-        shortcut.TargetPath = str(target)
-        shortcut.WorkingDirectory = str(target.parent)
-        shortcut.IconLocation = str(target)
-        shortcut.Save()
-        registry.setShortcutAppId(outPath)
-    finally:
-        pythoncom.CoUninitialize()
 
 def closeRunningVRCUtil() -> tuple[bool, bool]:
     return closeProcessImage("VRCUtil.exe")
@@ -207,11 +189,17 @@ class InstallPage(tkinter.Page):
             self.logWithProgress(f"\next connected: .vrcutilmodule > {self.master.installPath/'ModuleInstaller.exe'}")
 
             if IS_COMPILED:
-                createShortcut(self.master.installPath/"VRCUtil.exe",Path(os.environ["APPDATA"])/"Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk")
+                registry.createShortcut(
+                    Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk",
+                    self.master.installPath / "VRCUtil.exe",
+                )
             self.logWithProgress(f"\nStart menu shortcut created: VRCUtil.lnk")
 
             if IS_COMPILED:
-                createShortcut(self.master.installPath/"VRCUtil.exe",Path(os.environ["USERPROFILE"])/"Desktop/VRCUtil.lnk")
+                registry.createShortcut(
+                    Path(os.environ["USERPROFILE"]) / "Desktop/VRCUtil.lnk",
+                    self.master.installPath / "VRCUtil.exe",
+                )
             self.logWithProgress(f"\nDesktop shortcut created: VRCUtil.lnk")
 
             if steamvrInstalled:
@@ -226,7 +214,12 @@ class InstallPage(tkinter.Page):
             if IS_COMPILED:
                 registry.Program.unsetAutostart("VRCUtil")
                 registry.Program.unsetAutostartState("VRCUtil")
-                registry.Program.setStartupShortcut("VRCUtil", self.master.installPath/"VRCUtil.exe", "--minimize")
+                registry.Program.setStartupShortcut(
+                    "VRCUtil",
+                    self.master.installPath/"VRCUtil.exe",
+                    "--minimize",
+                    icon=self.master.installPath/"VRCUtil.exe",
+                )
                 if registry.Program.startupShortcutState("VRCUtil") is None:
                     registry.Program.setStartupShortcutState("VRCUtil", False)
             self.logWithProgress(f"\nStartup shortcut prepared: VRCUtil.lnk")

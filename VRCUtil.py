@@ -1,5 +1,3 @@
-WINDOW_NAME = "VRCUtil"
-MUTEX_NAME = "Haruna5718.VRCUtil"
 RELEASE_URL = "https://github.com/Haruna5718/VRCUtil/releases/latest"
 RELEASE_API_URL = "https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest"
 UPDATE_CHECK_INTERVAL = 60 * 60
@@ -10,7 +8,8 @@ import argparse
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--overlay", nargs=2, metavar=("PORT", "KEY"))
+parser.add_argument("--overlay", nargs=1, metavar="PORT")
+parser.add_argument("--openvr", nargs=1, metavar="PORT")
 parser.add_argument("--debug", action="store_true")
 parser.add_argument("--minimize", action="store_true")
 parser.add_argument("--nogui", action="store_true")
@@ -20,17 +19,24 @@ args = parser.parse_args()
 # Overlay ========================================
 
 if (args.overlay):
-    from vrcutil.overlay import _OverlayServer
-    raise SystemExit(_OverlayServer().serve(int(args.overlay[0]), args.overlay[1]))
+    from vrcutil.overlay import OverlayServer
+    raise SystemExit(OverlayServer().serve(int(args.overlay[0])))
+
+if (args.openvr):
+    from vrcutil.openvr import run_openvr_helper
+    raise SystemExit(run_openvr_helper(int(args.openvr[0])))
 
 # Single ========================================
 
 import ctypes
 import os
 import sys
+import subprocess
+import threading
 from pathlib import Path
 
-ERROR_ALREADY_EXISTS = 183
+from vrcutil import APP_ID, WINDOW_NAME
+
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 shell32 = ctypes.WinDLL("shell32", use_last_error=True)
@@ -43,24 +49,55 @@ CloseHandle = kernel32.CloseHandle
 CloseHandle.argtypes = [ctypes.c_void_p]
 CloseHandle.restype = ctypes.c_bool
 
+FindWindowW = user32.FindWindowW
+FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+FindWindowW.restype = ctypes.c_void_p
+
+ShowWindow = user32.ShowWindow
+ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+ShowWindow.restype = ctypes.c_bool
+
+IsIconic = user32.IsIconic
+IsIconic.argtypes = [ctypes.c_void_p]
+IsIconic.restype = ctypes.c_bool
+
+IsWindowVisible = user32.IsWindowVisible
+IsWindowVisible.argtypes = [ctypes.c_void_p]
+IsWindowVisible.restype = ctypes.c_bool
+
+BringWindowToTop = user32.BringWindowToTop
+BringWindowToTop.argtypes = [ctypes.c_void_p]
+BringWindowToTop.restype = ctypes.c_bool
+
 SetCurrentProcessExplicitAppUserModelID = shell32.SetCurrentProcessExplicitAppUserModelID
 SetCurrentProcessExplicitAppUserModelID.argtypes = [ctypes.c_wchar_p]
 SetCurrentProcessExplicitAppUserModelID.restype = ctypes.c_long
 
-SetCurrentProcessExplicitAppUserModelID(MUTEX_NAME)
+SetCurrentProcessExplicitAppUserModelID(APP_ID)
 
-mutexHandle = CreateMutexW(None, True, f"Local\\{MUTEX_NAME}")
+def activate_window(hwnd) -> bool:
+    if not hwnd:
+        return False
+
+    if not IsWindowVisible(hwnd):
+        ShowWindow(hwnd, 5)  # SW_SHOW
+    elif IsIconic(hwnd):
+        ShowWindow(hwnd, 9)  # SW_RESTORE
+    else:
+        ShowWindow(hwnd, 5)  # SW_SHOW
+
+    BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    return True
+
+mutexHandle = CreateMutexW(None, False, f"Local\\{APP_ID}")
 if not mutexHandle:
     raise ctypes.WinError(ctypes.get_last_error())
 
-if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
-    hwnd = user32.FindWindowW(None, WINDOW_NAME)
-    if hwnd:
-        if user32.IsIconic(hwnd):
-            user32.ShowWindow(hwnd, 9)
-        user32.SetForegroundWindow(hwnd)
-    CloseHandle(mutexHandle)
-    sys.exit(0)
+if ctypes.get_last_error() == 183:
+    if activate_window(FindWindowW(None, WINDOW_NAME)):
+        CloseHandle(mutexHandle)
+        sys.exit(0)
 
 # Log ========================================
 
@@ -84,11 +121,13 @@ import PIL.Image
 
 from vrcutil.core import VRCUtil, Module, logger
 from vrcutil.nogui import create_nogui_app
+from vrcutil.hook import invoke_module_hook
 
 app = create_nogui_app(WINDOW_NAME, "VRCUtil.ico", Path(__file__).parent) if args.nogui else VRCUtil(WINDOW_NAME, "VRCUtil.ico")
 window_runtime = app.api if args.nogui else app
 app.values.set("vrcutil_debug", args.debug, False)
 raw_window_destroy = window_runtime.destroy
+_force_window_close = threading.Event()
 
 
 class VRCUtilTray:
@@ -140,14 +179,30 @@ class VRCUtilTray:
             self.uninstall()
 
     def open_window(self, *_):
-        window_runtime.show()
-        window_runtime.restore()
+        show_main_window()
 
     def exit_app(self, *_):
-        target = terminate_process if self.no_gui else window_destroy
+        if self.no_gui:
+            target = terminate_process
+        else:
+            target = lambda: window_destroy(force=True)
         threading.Thread(target=target, daemon=True).start()
 
 tray = VRCUtilTray(app, no_gui=args.nogui)
+
+def show_main_window():
+    try:
+        hwnd = app._window.native.Handle.ToInt64()
+    except Exception:
+        window_runtime.show()
+        return
+
+    if IsIconic(hwnd):
+        window_runtime.restore()
+    elif not IsWindowVisible(hwnd):
+        window_runtime.show()
+
+    activate_window(hwnd)
 
 def bind_destroy(target):
     window_runtime.destroy = target
@@ -161,10 +216,8 @@ def update_destroy_binding(enabled: bool):
 from vrcutil import __version__, MODULES_PATH, INSTALL_PATH, DATA_PATH, PACKAGES_PATH, IS_COMPILED, EXECUTABLE, registry, steam
 from vrcutil.file import SafeJson, BufferedJsonSaver
 
-import threading
-
 try:
-    registry.setShortcutAppId(Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk", MUTEX_NAME)
+    registry.setShortcutAppId(Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/VRCUtil.lnk", APP_ID)
 except Exception:
     pass
 
@@ -268,12 +321,17 @@ def save_window_size():
     except Exception:
         logger.debug("Failed to persist window size", exc_info=True)
 
-def window_destroy():
-    save_window_size()
-    raw_window_destroy()
+def window_destroy(*, force=False):
+    if force:
+        _force_window_close.set()
+    try:
+        save_window_size()
+        raw_window_destroy()
+    finally:
+        if force and not _cleanup_done:
+            _force_window_close.clear()
 
 import urllib.request
-import subprocess
 import tempfile
 import shutil
 import importlib.util
@@ -282,6 +340,7 @@ import json
 import traceback
 from concurrent.futures import ThreadPoolExecutor, wait
 
+from packaging.version import InvalidVersion, Version
 from pywebwinui3.core import Status
 
 _cleanup_done = False
@@ -290,6 +349,13 @@ _cleanup_lock = threading.Lock()
 _notified_update_version = None
 _update_check_lock = threading.Lock()
 _update_check_stop = threading.Event()
+
+
+def _parse_app_version(value: str) -> Version:
+    normalized = str(value or "").strip()
+    if normalized[:1].lower() == "v":
+        normalized = normalized[1:]
+    return Version(normalized)
 
 @app.onValueChange("settings_checkUpdate")
 def checkUpdate(*_):
@@ -302,7 +368,13 @@ def checkUpdate(*_):
             with urllib.request.urlopen(RELEASE_API_URL, timeout=5) as resp:
                 latest_version = json.load(resp)["tag_name"]
                 app.values.set("vrcutil_latest", latest_version)
-                if latest_version != __version__ and latest_version != _notified_update_version:
+                try:
+                    has_update = _parse_app_version(latest_version) > _parse_app_version(__version__)
+                except InvalidVersion:
+                    logger.warning("Failed to parse VRCUtil version comparison: current=%s latest=%s", __version__, latest_version)
+                    has_update = latest_version.strip() != __version__.strip()
+
+                if has_update and latest_version != _notified_update_version:
                     _notified_update_version = latest_version
                     app.notice(
                         Status.Attention,
@@ -310,7 +382,7 @@ def checkUpdate(*_):
                         f"{latest_version} is available. Current version is {__version__}.",
                         {
                             "tag": "Button",
-                            "text": "Open Release",
+                            "text": "Release",
                             "attr": {
                                 "type": "link",
                                 "url": RELEASE_URL,
@@ -318,7 +390,7 @@ def checkUpdate(*_):
                             "child": [],
                         },
                     )
-                return app.values.set("vrcutil_hasUpdate", Status.Attention if latest_version != __version__ else "")
+                return app.values.set("vrcutil_hasUpdate", Status.Attention if has_update else "")
         except:
             pass
         finally:
@@ -364,9 +436,8 @@ def loadModule():
         return
 
     max_workers = min(len(modules), max(1, min(8, os.cpu_count() or 1)))
-    with app.batch_ui_sync():
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            wait([executor.submit(moduleSetup, module) for module in modules])
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        wait([executor.submit(moduleSetup, module) for module in modules])
 
 def resolveModuleEntry(path: Path) -> Path | None:
     if (entry:=sorted(path.glob("__init__*.pyd"))):
@@ -403,6 +474,11 @@ def bootstrapRuntime():
     initClient()
     initServer(direct=True)
     loadModule()
+    try:
+        app.events.closed -= CloseServices
+    except Exception:
+        pass
+    app.onExit()(CloseServices)
     app.start_process_monitor()
 
 GlobalTempDir = None
@@ -415,13 +491,34 @@ def restart(*_):
         cwd=INSTALL_PATH,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    window_destroy()
+    window_destroy(force=True)
 
 @app.onValueChange("vrcutil_removeModule_*")
-def removeModule(key, *_):
+def removeModule(key, before=None, after=None):
     global GlobalTempDir
+    if not after:
+        return
+
+    app.values.set(key, False, False)
     moduleName = key[21:]
+    modulePath = MODULES_PATH / moduleName
     moduleClass = app.Modules[moduleName]
+
+    try:
+        invoke_module_hook(
+            modulePath,
+            "uninstall",
+            module_name=moduleName,
+            module=moduleClass,
+            app=app,
+            install_root=INSTALL_PATH,
+            packages_path=PACKAGES_PATH,
+        )
+    except Exception as error:
+        logger.error("Failed to run uninstall hook for module %s\n%s", moduleName, traceback.format_exc())
+        app.notice(Status.Critical, f"Failed to remove module {moduleName}", str(error))
+        return
+
     with app.batch_ui_sync():
         if getattr(moduleClass,"__layout__",None):
             del app.values['system_pages'][moduleName]
@@ -432,7 +529,6 @@ def removeModule(key, *_):
         app.unregister_module(moduleName)
 
     if IS_COMPILED:
-        modulePath = MODULES_PATH/moduleName
         GlobalTempDir = GlobalTempDir or Path(tempfile.mkdtemp())
         shutil.move(str(modulePath), str(GlobalTempDir/modulePath.name))
 
@@ -467,6 +563,16 @@ def CloseServices():
     except:
         pass
     try:
+        from vrcutil import overlay
+        overlay.Manager.shutdown(immediate=True)
+    except:
+        pass
+    try:
+        from vrcutil.openvr import Manager as OpenVRHelperManager
+        OpenVRHelperManager.shutdown(immediate=True)
+    except:
+        pass
+    try:
         if GlobalTempDir:
             subprocess.Popen(["cmd", "/c", f"timeout /T 5 >nul & rmdir /S /Q {GlobalTempDir}"], creationflags=subprocess.CREATE_NO_WINDOW)
     except:
@@ -476,7 +582,16 @@ def CloseServices():
     except Exception:
         pass
 
-app.onExit()(CloseServices)
+@app.onClosing()
+def closeToTray():
+    if args.nogui:
+        return False
+    if _force_window_close.is_set():
+        return False
+    if not bool(app.values.get("settings_useTray", True)):
+        return False
+    window_runtime.hide()
+    return True
 
 @app.onValueChange("vrcutil_openLog")
 def openlog(*_):
@@ -490,7 +605,6 @@ def updateTray(*_, after=None):
     tray.set_enabled(enabled)
     update_destroy_binding(enabled)
 
-threading.Thread(target=bootstrapRuntime, daemon=True).start()
 startBackgroundTasks()
 
 def terminate_process():
@@ -504,12 +618,14 @@ if args.nogui:
     app.start(debug=args.debug)
     threading.Event().wait()
 else:
+    threading.Thread(target=bootstrapRuntime, daemon=True).start()
     tray_enabled = bool(app.values.get("settings_useTray", True))
     tray.set_enabled(tray_enabled)
     update_destroy_binding(tray_enabled)
     app.start(
         debug=args.debug,
         hidden=tray_enabled and args.minimize,
+        minimized=(not tray_enabled) and args.minimize,
         width=app.values.get("system_window_width", 900),
         height=app.values.get("system_window_height", 600),
     )

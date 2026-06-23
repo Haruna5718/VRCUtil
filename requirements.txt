@@ -1,5 +1,4 @@
 PySide6
-pywin32
 pywebwinui3
 pystray
 python-osc
@@ -11,3 +10,4 @@ PyOpenGL
 glfw
 openvr
 nuitka
+packaging

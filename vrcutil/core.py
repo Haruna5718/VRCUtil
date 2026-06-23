@@ -142,6 +142,9 @@ class VRCUtil(pywebwinui3.core.MainWindow):
     def _dashboard_widget_container(self) -> list:
         return self.values["system_pages"][""]["child"][0]["child"][0]["child"]
 
+    def _dashboard_widget_path(self) -> str:
+        return 'system_pages[""]["child"][0]["child"][0]["child"]'
+
     def sync_pages(self):
         self.values._sync("system_pages", None, self.values["system_pages"], True)
 
@@ -209,7 +212,8 @@ class VRCUtil(pywebwinui3.core.MainWindow):
             self._dashboard_widget_sort_keys[id(widget)] = sort_key
             container.append(widget)
             container.sort(key=lambda item: self._dashboard_widget_sort_keys.get(id(item), ("", "")))
-        self._request_page_sync()
+            next_value = list(container)
+        self.values.set(self._dashboard_widget_path(), next_value)
 
     def remove_module_widget(self, widget: dict):
         changed = False
@@ -220,7 +224,7 @@ class VRCUtil(pywebwinui3.core.MainWindow):
                 changed = True
             self._dashboard_widget_sort_keys.pop(id(widget), None)
         if changed:
-            self._request_page_sync()
+            self.values.set(self._dashboard_widget_path(), list(container))
 
     def register_module(self, module_key: str, module_class: "Module"):
         module_info = [
@@ -256,6 +260,7 @@ class VRCUtil(pywebwinui3.core.MainWindow):
 
     def _run_overlay_sync(self):
         from . import overlay
+        from . import openvr
 
         while True:
             with self._steamvr_overlay_lock:
@@ -269,12 +274,11 @@ class VRCUtil(pywebwinui3.core.MainWindow):
 
             try:
                 if state:
-                    logger.info("try to init openvr...")
-                    overlay.Manager.openvr()
-                    logger.info("openvr initialized")
+                    logger.info("Waiting for the module to start using OpenVR...")
                 else:
                     logger.info("try to stop openvr...")
-                    overlay.Manager.stop()
+                    overlay.Manager.stop(immediate=True)
+                    openvr.Manager.stop(immediate=True)
                     logger.info("openvr stopped")
             except Exception:
                 logger.error("Failed to sync OpenVR state\n%s", traceback.format_exc())
@@ -292,15 +296,27 @@ class VRCUtil(pywebwinui3.core.MainWindow):
             before = bool(self.values.get(value_key, False))
 
             if key == "steamvr" and before != state:
-                self._schedule_overlay_sync(state)
+                from . import overlay
+                from . import openvr
+
+                if state:
+                    overlay.Manager.resume()
+                    openvr.Manager.resume()
+                else:
+                    overlay.Manager.suspend()
+                    openvr.Manager.suspend()
 
             self.values.set(value_key, state)
+
+            if key == "steamvr" and before != state:
+                self._schedule_overlay_sync(state)
 
     def start(
         self,
         debug=False,
         *,
         hidden=False,
+        minimized=False,
         onTop=None,
         width=None,
         height=None,
@@ -313,6 +329,7 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         super().start(
             debug=debug,
             hidden=hidden,
+            minimized=minimized,
             on_top=bool(self.values.get("system_pin", False)),
             width=width,
             height=height,

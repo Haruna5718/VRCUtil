@@ -68,7 +68,15 @@
                                     <Text type="description">{vrcutil_modules[{i}][3]}</Text>
                                 </Vertical>
                                 <Space />
-                                <Button value="vrcutil_removeModule_{vrcutil_modules[{i}][0]}">Remove</Button>
+                                <Button
+                                    value="vrcutil_removeModule_{vrcutil_modules[{i}][0]}"
+                                    color="var(--SystemFillColorCriticalBrush)"
+                                    background="var(--SystemFillColorCriticalBackgroundBrush)"
+                                    hoverBackground="color-mix(in srgb, var(--SystemFillColorCriticalBackgroundBrush) 94%, white 6%)"
+                                    activeBackground="color-mix(in srgb, var(--SystemFillColorCriticalBackgroundBrush) 97%, white 3%)"
+                                    borderColor="var(--SystemFillColorCriticalBackgroundBrush)"
+                                    shadow="0 1px 0 0 var(--SmokeFillColorDefaultBrush), 0 0 0 1px var(--SystemFillColorCriticalBackgroundBrush) inset"
+                                >Remove</Button>
                             </Horizontal>
                         </Box>
                     </Repeat>

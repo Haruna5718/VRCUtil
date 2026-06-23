@@ -11,6 +11,16 @@ logger = logging.getLogger("vrcutil.steam")
 _installPath = None
 _libraryData = None
 
+
+def _read_json(path: pathlib.Path, default):
+	path = pathlib.Path(path)
+	if not path.exists():
+		return default
+	try:
+		return json.loads(SafeRead(path) or "")
+	except Exception:
+		return default
+
 def installPath() -> pathlib.Path:
 	global _installPath
 	if not _installPath:
@@ -77,20 +87,20 @@ class VR:
 
 	@property
 	def installed(self) -> bool:
-		configData = json.loads(SafeRead(installPath()/self.VRCONFIG_DIR) or "{}")
+		configData = _read_json(installPath()/self.VRCONFIG_DIR, {})
 		return str(self.manifest) in configData.get("manifest_paths", [])
 
 	@property
 	def autostart(self) -> bool|None:
 		if not self.config.exists():
 			return None
-		return bool(json.loads(SafeRead(self.config) or "{}").get("autolaunch", False))
+		return bool(_read_json(self.config, {}).get("autolaunch", False))
 	
 	def setAutostart(self, state:bool):
 		if not self.config.exists():
 			self.install()
 
-		appConfigData:dict = json.loads(SafeRead(self.config) or '{"last_launch_time": "0"}')
+		appConfigData:dict = _read_json(self.config, {"last_launch_time": "0"})
 		if bool(appConfigData.get("autolaunch", False)) == state:
 			return state
 		with open(self.config, "w") as file:
@@ -102,10 +112,12 @@ class VR:
 		return state
 		
 	def install(self):
-		configData = json.loads(SafeRead(installPath()/self.VRCONFIG_DIR) or "{}")
+		vrconfig = installPath()/self.VRCONFIG_DIR
+		vrconfig.parent.mkdir(parents=True, exist_ok=True)
+		configData = _read_json(vrconfig, {})
 		configData.setdefault("manifest_paths", [])
 		if str(self.manifest) not in configData["manifest_paths"]:
-			with open(installPath()/self.VRCONFIG_DIR, "w") as file:
+			with open(vrconfig, "w") as file:
 				configData["manifest_paths"].append(str(self.manifest))
 				json.dump(configData, file, indent=4)
 
@@ -117,10 +129,11 @@ class VR:
 		logger.info(f"SteamVR app registed: {self.name} {self.manifest}")
 	
 	def uninstall(self):
-		configData = json.loads(SafeRead(installPath()/self.VRCONFIG_DIR))
+		vrconfig = installPath()/self.VRCONFIG_DIR
+		configData = _read_json(vrconfig, {})
 		configData.setdefault("manifest_paths", [])
 		if str(self.manifest) in configData["manifest_paths"]:
-			with open(installPath()/self.VRCONFIG_DIR, "w") as file:
+			with open(vrconfig, "w") as file:
 				configData["manifest_paths"].remove(str(self.manifest))
 				json.dump(configData, file, indent=4)
 

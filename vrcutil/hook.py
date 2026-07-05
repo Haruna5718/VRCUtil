@@ -29,13 +29,10 @@ def resolve_module_hook(module_path: str | Path, hook: str) -> Path | None:
     for candidate in (
         module_path / f"{hook_base}.py",
         module_path / f"{hook_base}.pyc",
+        module_path / f"{hook_base}.pyd",
     ):
         if candidate.is_file():
             return candidate
-
-    compiled = sorted(module_path.glob(f"{hook_base}*.pyd"))
-    if compiled:
-        return compiled[0]
     return None
 
 

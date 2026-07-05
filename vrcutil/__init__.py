@@ -4,7 +4,7 @@ import pathlib
 
 __all__ = ["event", "file", "osc", "registry", "steam", "wmi", "tkinter", "core", "process"]
 
-__version__ = '3.2.0'
+__version__ = '3.3.0'
 
 WINDOW_NAME = "VRCUtil"
 APP_ID = "Haruna5718.VRCUtil"

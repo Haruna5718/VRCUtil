@@ -1,5 +1,6 @@
 import os
 import ctypes
+import logging
 import socket
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 from . import INSTALL_PATH, IS_COMPILED
 
 openvr = cast(Any, None)
+logger = logging.getLogger("vrcutil.openvr")
 
 if TYPE_CHECKING:
     import openvr as _openvr_module
@@ -18,6 +20,10 @@ if TYPE_CHECKING:
     _VRSystemType = _openvr_module.IVRSystem
 else:
     _VRSystemType = Any
+
+
+def _debug_cleanup(message: str, *args):
+    logger.debug(message, *args, exc_info=True)
 
 
 def _reserve_port() -> int:
@@ -75,7 +81,7 @@ class _OpenVRProcessClient:
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         except OSError:
-            pass
+            _debug_cleanup("Failed to clean up stray OpenVR helper processes")
 
     def _connect(self, port: int):
         deadline = time.time() + 10.0
@@ -146,11 +152,11 @@ class _OpenVRProcessClient:
                     if request_shutdown:
                         connection.send({"command": "shutdown"})
                 except OSError:
-                    pass
+                    _debug_cleanup("Failed to request OpenVR helper shutdown")
                 try:
                     connection.close()
                 except OSError:
-                    pass
+                    _debug_cleanup("Failed to close OpenVR helper connection")
 
             if process is not None:
                 if immediate:
@@ -164,16 +170,16 @@ class _OpenVRProcessClient:
                                 creationflags=subprocess.CREATE_NO_WINDOW,
                             )
                         except OSError:
-                            pass
+                            _debug_cleanup("Failed to force-kill OpenVR helper tree: pid=%s", process.pid)
                     else:
                         try:
                             process.kill()
                         except OSError:
-                            pass
+                            _debug_cleanup("Failed to kill OpenVR helper process: pid=%s", process.pid)
                     try:
                         process.wait(timeout=self.KILL_WAIT)
                     except subprocess.TimeoutExpired:
-                        pass
+                        logger.warning("OpenVR helper did not terminate after forced stop: pid=%s", process.pid)
                 else:
                     if os.name == "nt":
                         try:
@@ -188,11 +194,11 @@ class _OpenVRProcessClient:
                                     creationflags=subprocess.CREATE_NO_WINDOW,
                                 )
                             except OSError:
-                                pass
+                                _debug_cleanup("Failed to force-kill OpenVR helper tree after timeout: pid=%s", process.pid)
                             try:
                                 process.wait(timeout=self.KILL_WAIT)
                             except subprocess.TimeoutExpired:
-                                pass
+                                logger.warning("OpenVR helper still alive after timeout kill: pid=%s", process.pid)
                     else:
                         try:
                             process.wait(timeout=self.SHUTDOWN_WAIT)
@@ -200,11 +206,11 @@ class _OpenVRProcessClient:
                             try:
                                 process.kill()
                             except OSError:
-                                pass
+                                _debug_cleanup("Failed to kill OpenVR helper process after timeout: pid=%s", process.pid)
                             try:
                                 process.wait(timeout=self.KILL_WAIT)
                             except subprocess.TimeoutExpired:
-                                pass
+                                logger.warning("OpenVR helper still alive after timeout kill: pid=%s", process.pid)
 
             self._cleanup_stray_processes(port)
 
@@ -280,7 +286,7 @@ class _OpenVRServer:
         try:
             self.openvr.shutdown()
         except Exception:
-            pass
+            _debug_cleanup("Failed to shut down OpenVR runtime")
         finally:
             self.vrSystem = None
 

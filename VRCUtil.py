@@ -391,11 +391,15 @@ def checkUpdate(*_):
                         },
                     )
                 return app.values.set("vrcutil_hasUpdate", Status.Attention if has_update else "")
-        except:
-            pass
+        except Exception:
+            logger.debug("Failed to check VRCUtil update", exc_info=True)
+            app.values.set("vrcutil_latest", "failed")
+            app.values.set("vrcutil_hasUpdate", "")
+            return
         finally:
             _update_check_lock.release()
     app.values.set("vrcutil_latest", "unknown")
+    app.values.set("vrcutil_hasUpdate", "")
 
 def updateCheckLoop():
     checkUpdate()

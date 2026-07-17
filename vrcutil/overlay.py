@@ -28,9 +28,7 @@ Image = cast(Any, None)
 
 GL_CLAMP_TO_EDGE = 0
 GL_LINEAR = 0
-GL_PIXEL_UNPACK_BUFFER = 0
 GL_RGBA = 0
-GL_STREAM_DRAW = 0
 GL_TEXTURE_2D = 0
 GL_TEXTURE_MAG_FILTER = 0
 GL_TEXTURE_MIN_FILTER = 0
@@ -39,13 +37,8 @@ GL_TEXTURE_WRAP_T = 0
 GL_UNPACK_ALIGNMENT = 0
 GL_UNSIGNED_BYTE = 0
 
-glBindBuffer = cast(Any, None)
 glBindTexture = cast(Any, None)
-glBufferData = cast(Any, None)
-glBufferSubData = cast(Any, None)
-glDeleteBuffers = cast(Any, None)
 glDeleteTextures = cast(Any, None)
-glGenBuffers = cast(Any, None)
 glGenTextures = cast(Any, None)
 glPixelStorei = cast(Any, None)
 glTexImage2D = cast(Any, None)
@@ -96,11 +89,10 @@ def _ensure_overlay_runtime():
 		return
 
 	global glfw, openvr, Image
-	global GL_CLAMP_TO_EDGE, GL_LINEAR, GL_PIXEL_UNPACK_BUFFER, GL_RGBA, GL_STREAM_DRAW
+	global GL_CLAMP_TO_EDGE, GL_LINEAR, GL_RGBA
 	global GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_TEXTURE_MIN_FILTER
 	global GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T, GL_UNPACK_ALIGNMENT, GL_UNSIGNED_BYTE
-	global glBindBuffer, glBindTexture, glBufferData, glBufferSubData
-	global glDeleteBuffers, glDeleteTextures, glGenBuffers, glGenTextures
+	global glBindTexture, glDeleteTextures, glGenTextures
 	global glPixelStorei, glTexImage2D, glTexParameteri, glTexSubImage2D
 
 	import glfw as imported_glfw
@@ -108,9 +100,7 @@ def _ensure_overlay_runtime():
 	from OpenGL.GL import (
 		GL_CLAMP_TO_EDGE as imported_GL_CLAMP_TO_EDGE,
 		GL_LINEAR as imported_GL_LINEAR,
-		GL_PIXEL_UNPACK_BUFFER as imported_GL_PIXEL_UNPACK_BUFFER,
 		GL_RGBA as imported_GL_RGBA,
-		GL_STREAM_DRAW as imported_GL_STREAM_DRAW,
 		GL_TEXTURE_2D as imported_GL_TEXTURE_2D,
 		GL_TEXTURE_MAG_FILTER as imported_GL_TEXTURE_MAG_FILTER,
 		GL_TEXTURE_MIN_FILTER as imported_GL_TEXTURE_MIN_FILTER,
@@ -118,13 +108,8 @@ def _ensure_overlay_runtime():
 		GL_TEXTURE_WRAP_T as imported_GL_TEXTURE_WRAP_T,
 		GL_UNPACK_ALIGNMENT as imported_GL_UNPACK_ALIGNMENT,
 		GL_UNSIGNED_BYTE as imported_GL_UNSIGNED_BYTE,
-		glBindBuffer as imported_glBindBuffer,
 		glBindTexture as imported_glBindTexture,
-		glBufferData as imported_glBufferData,
-		glBufferSubData as imported_glBufferSubData,
-		glDeleteBuffers as imported_glDeleteBuffers,
 		glDeleteTextures as imported_glDeleteTextures,
-		glGenBuffers as imported_glGenBuffers,
 		glGenTextures as imported_glGenTextures,
 		glPixelStorei as imported_glPixelStorei,
 		glTexImage2D as imported_glTexImage2D,
@@ -136,9 +121,7 @@ def _ensure_overlay_runtime():
 	openvr = imported_openvr
 	GL_CLAMP_TO_EDGE = imported_GL_CLAMP_TO_EDGE
 	GL_LINEAR = imported_GL_LINEAR
-	GL_PIXEL_UNPACK_BUFFER = imported_GL_PIXEL_UNPACK_BUFFER
 	GL_RGBA = imported_GL_RGBA
-	GL_STREAM_DRAW = imported_GL_STREAM_DRAW
 	GL_TEXTURE_2D = imported_GL_TEXTURE_2D
 	GL_TEXTURE_MAG_FILTER = imported_GL_TEXTURE_MAG_FILTER
 	GL_TEXTURE_MIN_FILTER = imported_GL_TEXTURE_MIN_FILTER
@@ -146,13 +129,8 @@ def _ensure_overlay_runtime():
 	GL_TEXTURE_WRAP_T = imported_GL_TEXTURE_WRAP_T
 	GL_UNPACK_ALIGNMENT = imported_GL_UNPACK_ALIGNMENT
 	GL_UNSIGNED_BYTE = imported_GL_UNSIGNED_BYTE
-	glBindBuffer = imported_glBindBuffer
 	glBindTexture = imported_glBindTexture
-	glBufferData = imported_glBufferData
-	glBufferSubData = imported_glBufferSubData
-	glDeleteBuffers = imported_glDeleteBuffers
 	glDeleteTextures = imported_glDeleteTextures
-	glGenBuffers = imported_glGenBuffers
 	glGenTextures = imported_glGenTextures
 	glPixelStorei = imported_glPixelStorei
 	glTexImage2D = imported_glTexImage2D
@@ -276,6 +254,8 @@ class BITMAPINFO(ctypes.Structure):
 
 user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
 user32.RegisterClassW.restype = wintypes.ATOM
+user32.UnregisterClassW.argtypes = [wintypes.LPCWSTR, wintypes.HINSTANCE]
+user32.UnregisterClassW.restype = wintypes.BOOL
 user32.CreateWindowExW.argtypes = [
     wintypes.DWORD,
     wintypes.LPCWSTR,
@@ -640,6 +620,7 @@ class OpenGLManager:
     def release(self, overlay_handle: int | None):
         if overlay_handle is None:
             return
+        _OVERLAY_COMMANDS.discard_overlay(int(overlay_handle))
         prefix = f"{int(overlay_handle)}:"
         for key in tuple(self._shared_buffers):
             if f"{key[0]}:{key[1]}".startswith(prefix):
@@ -663,18 +644,22 @@ class OpenGLManager:
             shm = self._ensure_shared_buffer(key, len(payload))
             shm.buf[: len(payload)] = payload
             shared_name = shm.name
-
-        payload_data = {
-            "overlay_handle": int(handle),
-            "name": name,
-            "size": rgba.size,
-            "byte_length": len(payload),
-            "shared_name": shared_name,
-        }
+            payload_data = {
+                "overlay_handle": int(handle),
+                "name": name,
+                "size": rgba.size,
+                "byte_length": len(payload),
+                "shared_name": shared_name,
+            }
+            if not sync:
+                _OVERLAY_COMMANDS.submit(
+                    (int(handle), f"texture:{name}"),
+                    "set_texture_shared",
+                    wait=True,
+                    **payload_data,
+                )
         if sync:
             Manager.request("set_texture_shared", **payload_data)
-        else:
-            Manager.post("set_texture_shared", **payload_data)
 
 
 class DesktopOverlayWindow:
@@ -780,7 +765,7 @@ class DesktopOverlayWindow:
                 self._frame = None
                 self._frame_token += 1
             return
-        frame = image.convert("RGBA")
+        frame = image if image.mode == "RGBA" else image.convert("RGBA")
         with self._lock:
             self._frame = frame
             self._frame_token += 1
@@ -840,6 +825,19 @@ class DesktopOverlayWindow:
         if self._hwnd and user32.IsWindow(self._hwnd):
             user32.DestroyWindow(self._hwnd)
         self._hwnd = None
+
+    def _unregister_window_class(self):
+        if not self._class_atom:
+            return
+        try:
+            if not user32.UnregisterClassW(self._class_name, kernel32.GetModuleHandleW(None)):
+                error = ctypes.get_last_error()
+                if error not in (1411,):
+                    raise ctypes.WinError(error)
+        except Exception:
+            _debug_cleanup("Failed to unregister desktop overlay window class: %s", self.name)
+        finally:
+            self._class_atom = 0
 
     def _install_event_hooks(self, pid: int):
         self._uninstall_event_hooks()
@@ -1102,7 +1100,6 @@ class DesktopOverlayWindow:
         return max(0.25, min(width_factor, height_factor))
 
     def _compose_canvas(self, frame: Any, token: int, client_width: int, client_height: int, layout: DesktopOverlayLayout):
-        ImageModule = _ensure_image()
         anchor_x, anchor_y = DESKTOP_OVERLAY_ANCHORS[layout.anchor]
         offset_x = round(client_width * layout.offset_x_percent / 100)
         offset_y = round(client_height * layout.offset_y_percent / 100)
@@ -1117,9 +1114,7 @@ class DesktopOverlayWindow:
         top = offset_y if anchor_y == "top" else client_height - draw_height - offset_y
         left = max(0, min(max(0, client_width - draw_width), left))
         top = max(0, min(max(0, client_height - draw_height), top))
-        canvas = ImageModule.new("RGBA", (client_width, client_height), (0, 0, 0, 0))
-        canvas.alpha_composite(scaled, (left, top))
-        return canvas, (token, client_width, client_height, draw_width, draw_height, left, top, layout)
+        return scaled, left, top, (token, client_width, client_height, draw_width, draw_height, left, top, layout)
 
     def _update_layered_window(self, left: int, top: int, image: Any):
         width, height = image.size
@@ -1166,9 +1161,13 @@ class DesktopOverlayWindow:
         if client_rect is None:
             self._hide()
             return
-        left, top, width, height = client_rect
+        client_left, client_top, width, height = client_rect
+        canvas, relative_left, relative_top, canvas_state = self._compose_canvas(frame, token, width, height, layout)
+        left = client_left + relative_left
+        top = client_top + relative_top
+        draw_width, draw_height = canvas.size
         anchor = self._z_order_anchor(target)
-        window_state = (_hwnd_value(target), left, top, width, height, _hwnd_value(anchor))
+        window_state = (_hwnd_value(target), left, top, draw_width, draw_height, _hwnd_value(anchor))
         current_anchor = self._current_overlay_anchor()
         if self._last_window_state != window_state or _hwnd_value(current_anchor) != _hwnd_value(anchor):
             self._mark_active()
@@ -1177,13 +1176,12 @@ class DesktopOverlayWindow:
                 anchor,
                 left,
                 top,
-                width,
-                height,
+                draw_width,
+                draw_height,
                 SWP_NOACTIVATE | SWP_NOSENDCHANGING | SWP_SHOWWINDOW,
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
             self._last_window_state = window_state
-        canvas, canvas_state = self._compose_canvas(frame, token, width, height, layout)
         if self._last_canvas_state != canvas_state:
             self._update_layered_window(left, top, canvas)
             self._last_canvas_state = canvas_state
@@ -1207,6 +1205,7 @@ class DesktopOverlayWindow:
                 self._hide()
                 self._pump_messages()
                 self._destroy_window()
+                self._unregister_window_class()
             finally:
                 self._release_bitmap_resources()
                 self._wake_event.clear()
@@ -1229,7 +1228,7 @@ class VRChatDesktopOverlay(DesktopOverlayWindow):
 
 class _OverlayCommandDispatcher:
     def __init__(self):
-        self._pending: dict[tuple[int, str], tuple[str, dict[str, object]]] = {}
+        self._pending: dict[tuple[int, str], tuple[str, dict[str, object], bool]] = {}
         self._lock = threading.Lock()
         self._event = threading.Event()
         self._thread = None
@@ -1255,20 +1254,29 @@ class _OverlayCommandDispatcher:
                     if not self._pending:
                         self._event.clear()
                         break
-                    pending = list(self._pending.values())
-                    self._pending.clear()
-
-                for command, payload in pending:
+                    key, (command, payload, wait) = self._pending.popitem()
                     try:
-                        Manager.post(command, **payload)
+                        if wait:
+                            Manager.request(command, **payload)
+                        else:
+                            Manager.post(command, **payload)
                     except Exception:
                         _debug_cleanup("Failed to dispatch overlay command: %s", command)
 
-    def submit(self, key: tuple[int, str], command: str, **payload):
+    def submit(self, key: tuple[int, str], command: str, *, wait: bool = False, **payload):
         self._ensure_started()
         with self._lock:
-            self._pending[key] = (command, payload)
+            self._pending[key] = (command, payload, bool(wait))
             self._event.set()
+
+    def discard_overlay(self, overlay_handle: int):
+        overlay_handle = int(overlay_handle)
+        with self._lock:
+            for key in tuple(self._pending):
+                if key[0] == overlay_handle:
+                    self._pending.pop(key, None)
+            if not self._pending:
+                self._event.clear()
 
 
 _OVERLAY_COMMANDS = _OverlayCommandDispatcher()
@@ -1428,6 +1436,7 @@ class VROverlay:
 
     def stop(self):
         if self.overlay_handle is not None:
+            _OVERLAY_COMMANDS.discard_overlay(int(self.overlay_handle))
             try:
                 try:
                     Manager.request("destroy_overlay", overlay_handle=self.overlay_handle)
@@ -1456,8 +1465,6 @@ class OverlayServer:
         self._last_dashboard_check = 0.0
         self.texture_cache: dict[str, int] = {}
         self.texture_sizes: dict[str, tuple[int, int]] = {}
-        self.pbo_cache: dict[str, int] = {}
-        self.pbo_sizes: dict[str, int] = {}
         self.overlays: dict[int, dict[str, object]] = {}
         self._projection_bounds: tuple[float, float, float, float] | None = None
         self.shared_memory_cache: dict[str, shared_memory.SharedMemory] = {}
@@ -1514,17 +1521,6 @@ class OverlayServer:
         if self.texture_sizes.get(key) != tuple(size):
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, *size, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
             self.texture_sizes[key] = tuple(size)
-
-    def _ensure_pbo(self, key: str, byte_length: int):
-        pbo = self.pbo_cache.get(key)
-        if pbo is None:
-            pbo = glGenBuffers(1)
-            self.pbo_cache[key] = pbo
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo)
-        if self.pbo_sizes.get(key) != int(byte_length):
-            glBufferData(GL_PIXEL_UNPACK_BUFFER, int(byte_length), None, GL_STREAM_DRAW)
-            self.pbo_sizes[key] = int(byte_length)
-        return pbo
 
     def _apply_visibility(self, overlay_handle: int):
         state = self.overlays[overlay_handle]
@@ -1598,14 +1594,10 @@ class OverlayServer:
         for key in self._overlay_texture_keys(overlay_handle):
             texture = self.texture_cache.pop(key, None)
             self.texture_sizes.pop(key, None)
-            pbo = self.pbo_cache.pop(key, None)
-            self.pbo_sizes.pop(key, None)
             self._close_cached_shared_memory(
                 self.texture_shared_names.pop(key, None),
                 "Failed to close shared memory while destroying overlay resources",
             )
-            if pbo is not None:
-                glDeleteBuffers(1, [pbo])
             if texture is not None:
                 glDeleteTextures([texture])
         if self._initialized:
@@ -1682,14 +1674,7 @@ class OverlayServer:
         key = self._texture_key(overlay_handle, name)
         self._ensure_texture(key, tuple(size))
         shm = self._get_shared_memory(key, shared_name)
-        self._ensure_pbo(key, byte_length)
         pixel_buffer_type = ctypes.c_ubyte * int(byte_length)
-        glBufferSubData(
-            GL_PIXEL_UNPACK_BUFFER,
-            0,
-            int(byte_length),
-            pixel_buffer_type.from_buffer(shm.buf),
-        )
         glBindTexture(GL_TEXTURE_2D, self.texture_cache[key])
         glTexSubImage2D(
             GL_TEXTURE_2D,
@@ -1700,9 +1685,8 @@ class OverlayServer:
             size[1],
             GL_RGBA,
             GL_UNSIGNED_BYTE,
-            None,
+            pixel_buffer_type.from_buffer(shm.buf),
         )
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0)
 
         texture = openvr.Texture_t()
         texture.handle = ctypes.c_void_p(int(self.texture_cache[key]))
@@ -1723,13 +1707,13 @@ class OverlayServer:
         for shm in self.shared_memory_cache.values():
             _close_shared_memory(shm, "Failed to close shared memory during overlay host close")
         self.shared_memory_cache.clear()
-        for pbo in self.pbo_cache.values():
+        for texture in self.texture_cache.values():
             try:
-                glDeleteBuffers(1, [pbo])
+                glDeleteTextures([texture])
             except Exception:
-                _debug_cleanup("Failed to delete OpenGL pixel buffer during overlay host close")
-        self.pbo_cache.clear()
-        self.pbo_sizes.clear()
+                _debug_cleanup("Failed to delete OpenGL texture during overlay host close")
+        self.texture_cache.clear()
+        self.texture_sizes.clear()
 
         if self.window is not None:
             glfw.destroy_window(self.window)

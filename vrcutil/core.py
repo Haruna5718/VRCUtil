@@ -210,9 +210,8 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         with self._page_lock:
             container = self._dashboard_widget_container()
             self._dashboard_widget_sort_keys[id(widget)] = sort_key
-            container.append(widget)
-            container.sort(key=lambda item: self._dashboard_widget_sort_keys.get(id(item), ("", "")))
-            next_value = list(container)
+            next_value = [*container, widget]
+            next_value.sort(key=lambda item: self._dashboard_widget_sort_keys.get(id(item), ("", "")))
         self.values.set(self._dashboard_widget_path(), next_value)
 
     def remove_module_widget(self, widget: dict):
@@ -220,11 +219,11 @@ class VRCUtil(pywebwinui3.core.MainWindow):
         with self._page_lock:
             container = self._dashboard_widget_container()
             if widget in container:
-                container.remove(widget)
+                next_value = [item for item in container if item is not widget]
                 changed = True
             self._dashboard_widget_sort_keys.pop(id(widget), None)
         if changed:
-            self.values.set(self._dashboard_widget_path(), list(container))
+            self.values.set(self._dashboard_widget_path(), next_value)
 
     def register_module(self, module_key: str, module_class: "Module"):
         module_info = [

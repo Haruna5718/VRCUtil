@@ -1,18 +1,35 @@
 import logging
 import threading
 import tkinter as tk
+from collections import deque
 from tkinter.scrolledtext import ScrolledText
-from logging.handlers import MemoryHandler
 
 
-log_buffer = MemoryHandler(capacity=5000)
+class BoundedLogHandler(logging.Handler):
+    def __init__(self, capacity=5000):
+        super().__init__()
+        self.buffer = deque(maxlen=capacity)
+
+    def emit(self, record):
+        self.buffer.append(record)
+
+    def snapshot(self):
+        self.acquire()
+        try:
+            return tuple(self.buffer)
+        finally:
+            self.release()
+
+
+log_buffer = BoundedLogHandler()
 logging.getLogger().addHandler(log_buffer)
 
 
 class TkinterLogHandler(logging.Handler):
-    def __init__(self, text_widget):
+    def __init__(self, text_widget, max_lines=5000):
         super().__init__()
         self.text_widget = text_widget
+        self.max_lines = max_lines
         self._destroyed = False
 
     def emit(self, record):
@@ -30,6 +47,9 @@ class TkinterLogHandler(logging.Handler):
         try:
             self.text_widget.insert(tk.END, msg + "\n")
             self.text_widget.see(tk.END)
+            line_count = int(self.text_widget.index("end-1c").split(".")[0])
+            if line_count > self.max_lines:
+                self.text_widget.delete("1.0", f"{line_count - self.max_lines + 1}.0")
         except tk.TclError:
             self._destroyed = True
 
@@ -56,7 +76,7 @@ def open_log_window(title="Logger Window"):
                 base_formatter = h.formatter
                 break
         base_formatter = base_formatter or logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        for record in log_buffer.buffer:
+        for record in log_buffer.snapshot():
             text.insert(tk.END, base_formatter.format(record) + "\n")
 
         handler = TkinterLogHandler(text)

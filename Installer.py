@@ -1,6 +1,14 @@
 import sys
 
-if "--debug" in sys.argv:
+import argparse
+
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument("--debug", action="store_true")
+parser.add_argument("--direct", action="store_true")
+parser.add_argument("--path", dest="install_path")
+args, _ = parser.parse_known_args()
+
+if args.debug:
 	import ctypes
 	ctypes.windll.kernel32.AllocConsole()
 	sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
@@ -40,22 +48,57 @@ def launchVRCUtil(installPath:Path):
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
+
+def schedule_cleanup(path: str | Path | None = None):
+    target = Path(path).resolve() if path else rootPath
+    if not target.is_absolute():
+        return
+
+    subprocess.Popen(
+        [
+            "cmd",
+            "/c",
+            f'timeout /T 5 >nul & if exist "{target}" rmdir /S /Q "{target}"',
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+
 class MainWindow(tkinter.App):
-    def __init__(self, title:str, size:list[int], icon: str|Path, resize:bool=True):
+    def __init__(
+        self,
+        title:str,
+        size:list[int],
+        icon: str|Path,
+        resize:bool=True,
+        *,
+        install_path: str | None = None,
+        auto_install: bool = False,
+        direct_mode: bool = False,
+    ):
         super().__init__(title, size, icon, resize)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.installPath = Path(os.environ["LOCALAPPDATA"])/"VRCUtil"
+        self.directMode = bool(direct_mode)
+        self.autoInstall = bool(auto_install or direct_mode)
+        self.installPath = Path(install_path).expanduser() if install_path else Path(os.environ["LOCALAPPDATA"])/"VRCUtil"
 
         self.page = WelcomPage(self, self.acm, icon)
         self.page.grid(row=0, sticky="snew")
 
         self.autoLaunch = tkinter.CheckBox(self, self.acm, text="Launch VRCUtil after installed")
-        self.autoLaunch.grid(row=1, padx=20, pady=20, sticky="w")
+        self.autoLaunch.variable.set(1 if self.directMode else 0)
+        if not self.directMode:
+            self.autoLaunch.grid(row=1, padx=20, pady=20, sticky="w")
 
-        tkinter.Button(self, self.acm, text="Install", color=Status.Attention, callback=self.install).grid(row=1, padx=20, pady=20, sticky="e")
+        self.installButton = tkinter.Button(self, self.acm, text="Install", color=Status.Attention, callback=self.install)
+        self.installButton.grid(row=1, padx=20, pady=20, sticky="e")
+
+        if self.autoInstall:
+            self.after(0, lambda: self.install(self.installButton))
 
     def install(self, target:tkinter.Button):
         self.installPath = Path(self.page.installPath.read())
@@ -64,6 +107,16 @@ class MainWindow(tkinter.App):
         self.setClosable(False)
         self.page = InstallPage(self, self.acm, target)
         self.page.grid(row=0, sticky="snew")
+
+    def exit(self, code: int = 0):
+        if self.directMode:
+            schedule_cleanup()
+        sys.exit(code)
+
+    def destroy(self):
+        if self.directMode:
+            schedule_cleanup()
+        super().destroy()
 
 class WelcomPage(tkinter.Page):
     def __init__(self, master:MainWindow, acm, icon: str|Path):
@@ -241,14 +294,19 @@ class InstallPage(tkinter.Page):
             
             if self.master.autoLaunch.value and IS_COMPILED:
                 launchVRCUtil(self.master.installPath)
-                self.master.autoLaunch.configure(state="disabled")
+                if not self.master.directMode:
+                    self.master.autoLaunch.configure(state="disabled")
             else:
-                self.master.autoLaunch.configure(text="Launch VRCUtil")
+                if not self.master.directMode:
+                    self.master.autoLaunch.configure(text="Launch VRCUtil")
 
             self.progress.config(Status.Success)
+            if self.master.directMode:
+                self.master.exit(0)
+                return
             self.button.config(True,"Done")
             self.master.setClosable(True)
-            self.button.callback=((lambda _: sys.exit(0)) if self.master.autoLaunch.value else self.close)
+            self.button.callback=((lambda _: self.master.exit(0)) if self.master.autoLaunch.value else self.close)
         except Exception as e:
             self.installLog.write("\n\nInstallation failed. Rolling back...")
             try:
@@ -288,7 +346,7 @@ class InstallPage(tkinter.Page):
             self.progress.config(Status.Critical)
             self.button.config(True,"Close")
             self.master.setClosable(True)
-            self.button.callback=lambda _: sys.exit(1)
+            self.button.callback=lambda _: self.master.exit(1)
         finally:
             if stagePath:
                 shutil.rmtree(stagePath.parent, ignore_errors=True)
@@ -298,7 +356,15 @@ class InstallPage(tkinter.Page):
     def close(self, _):
         if self.master.autoLaunch.value and IS_COMPILED:
             launchVRCUtil(self.master.installPath)
-        sys.exit(0)
+        self.master.exit(0)
 
-app = MainWindow("VRCUtil Installer", [500, 300], rootPath/"VRCUtil.ico", False)
+app = MainWindow(
+    "VRCUtil Installer",
+    [500, 300],
+    rootPath/"VRCUtil.ico",
+    False,
+    install_path=args.install_path,
+    auto_install=bool(args.direct),
+    direct_mode=args.direct,
+)
 app.start()

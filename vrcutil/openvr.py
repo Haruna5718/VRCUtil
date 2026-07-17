@@ -233,6 +233,10 @@ class Manager:
         return cls._client.request(command, **payload)
 
     @classmethod
+    def call_many(cls, calls):
+        return cls._client.request("call_vrsystem_many", calls=calls)
+
+    @classmethod
     def stop(cls, immediate: bool = False):
         cls._client.stop(immediate=immediate)
 
@@ -250,10 +254,18 @@ class Manager:
 
 
 class _VRSystemProxy:
+    def __init__(self):
+        self._methods = {}
+
     def __getattr__(self, name: str):
+        caller = self._methods.get(name)
+        if caller is not None:
+            return caller
+
         def caller(*args, **kwargs):
             return Manager.request("call_vrsystem", method=name, args=args, kwargs=kwargs)
 
+        self._methods[name] = caller
         return caller
 
 
@@ -299,11 +311,23 @@ class _OpenVRServer:
         function = getattr(self.vrSystem, method)
         return function(*(args or ()), **(kwargs or {}))
 
+    def call_vrsystem_many(self, calls):
+        self._initialize()
+        results = []
+        for method, args, kwargs in calls:
+            try:
+                function = getattr(self.vrSystem, method)
+                results.append(function(*(args or ()), **(kwargs or {})))
+            except Exception:
+                results.append(None)
+        return results
+
     def serve(self, port: int):
         listener = Listener(("127.0.0.1", port))
         commands = {
             "initialize": self.initialize,
             "call_vrsystem": self.call_vrsystem,
+            "call_vrsystem_many": self.call_vrsystem_many,
         }
         try:
             connection = listener.accept()
@@ -322,7 +346,6 @@ class _OpenVRServer:
                         command = commands[request["command"]]
                         result = command(**{k: v for k, v in request.items() if k != "command"})
                     except Exception as exc:
-                        self._shutdown()
                         connection.send({"ok": False, "error": str(exc)})
                     else:
                         connection.send({"ok": True, "result": result})

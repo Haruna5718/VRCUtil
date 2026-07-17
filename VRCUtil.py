@@ -1,5 +1,6 @@
 RELEASE_URL = "https://github.com/Haruna5718/VRCUtil/releases/latest"
 RELEASE_API_URL = "https://api.github.com/repos/Haruna5718/VRCUtil/releases/latest"
+INSTALLER_ASSET_NAME = "VRCUtil-Installer.exe"
 UPDATE_CHECK_INTERVAL = 60 * 60
 
 # Args ========================================
@@ -14,7 +15,7 @@ parser.add_argument("--debug", action="store_true")
 parser.add_argument("--minimize", action="store_true")
 parser.add_argument("--nogui", action="store_true")
 
-args = parser.parse_args()
+args, _ = parser.parse_known_args()
 
 # Overlay ========================================
 
@@ -112,7 +113,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S"
 )
 
-from Logger import open_log_window
+from Logger import log_buffer, open_log_window
+
+log_buffer.setLevel(logging.DEBUG if args.debug else logging.CRITICAL + 1)
 
 # Setting ========================================
 
@@ -142,12 +145,16 @@ class VRCUtilTray:
 
         self.icon = pystray.Icon(
             WINDOW_NAME,
-            PIL.Image.open(INSTALL_PATH / self.app.values.get("system_icon")),
+            self._load_icon(),
             WINDOW_NAME,
             pystray.Menu(*self._menu_items()),
         )
         threading.Thread(target=self.icon.run, daemon=True).start()
         return True
+
+    def _load_icon(self):
+        with PIL.Image.open(INSTALL_PATH / self.app.values.get("system_icon")) as image:
+            return image.copy()
 
     def _menu_items(self):
         if self.no_gui:
@@ -337,6 +344,7 @@ import shutil
 import importlib.util
 import site
 import json
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, wait
 
@@ -347,8 +355,12 @@ _cleanup_done = False
 _cleanup_lock = threading.Lock()
 
 _notified_update_version = None
+_latest_installer_url = ""
+_latest_release_url = RELEASE_URL
 _update_check_lock = threading.Lock()
+_update_install_lock = threading.Lock()
 _update_check_stop = threading.Event()
+_update_notice_key = "vrcutil_update_download"
 
 
 def _parse_app_version(value: str) -> Version:
@@ -357,40 +369,85 @@ def _parse_app_version(value: str) -> Version:
         normalized = normalized[1:]
     return Version(normalized)
 
+
+def _fetch_latest_release() -> dict[str, str]:
+    request = urllib.request.Request(
+        RELEASE_API_URL,
+        headers={
+            "User-Agent": f"VRCUtil/{__version__}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=5) as resp:
+        payload = json.load(resp)
+
+    installer_url = ""
+    for asset in payload.get("assets", []):
+        name = str(asset.get("name") or "").strip()
+        if name == INSTALLER_ASSET_NAME:
+            installer_url = str(asset.get("browser_download_url") or "").strip()
+            break
+    if not installer_url:
+        for asset in payload.get("assets", []):
+            name = str(asset.get("name") or "").strip().lower()
+            if name.endswith(".exe") and "installer" in name:
+                installer_url = str(asset.get("browser_download_url") or "").strip()
+                break
+
+    return {
+        "tag_name": str(payload.get("tag_name") or "").strip(),
+        "html_url": str(payload.get("html_url") or RELEASE_URL).strip() or RELEASE_URL,
+        "installer_url": installer_url,
+    }
+
 @app.onValueChange("settings_checkUpdate")
 def checkUpdate(*_):
-    global _notified_update_version
+    global _notified_update_version, _latest_installer_url, _latest_release_url
     if app.values.get("settings_checkUpdate", False):
         if not _update_check_lock.acquire(blocking=False):
             return
         try:
             app.values.set("vrcutil_latest", "fetching")
-            with urllib.request.urlopen(RELEASE_API_URL, timeout=5) as resp:
-                latest_version = json.load(resp)["tag_name"]
-                app.values.set("vrcutil_latest", latest_version)
-                try:
-                    has_update = _parse_app_version(latest_version) > _parse_app_version(__version__)
-                except InvalidVersion:
-                    logger.warning("Failed to parse VRCUtil version comparison: current=%s latest=%s", __version__, latest_version)
-                    has_update = latest_version.strip() != __version__.strip()
+            release = _fetch_latest_release()
+            latest_version = release["tag_name"]
+            _latest_installer_url = release["installer_url"]
+            _latest_release_url = release["html_url"]
+            app.values.set("vrcutil_latest", latest_version)
+            try:
+                has_update = _parse_app_version(latest_version) > _parse_app_version(__version__)
+            except InvalidVersion:
+                logger.warning("Failed to parse VRCUtil version comparison: current=%s latest=%s", __version__, latest_version)
+                has_update = latest_version.strip() != __version__.strip()
 
-                if has_update and latest_version != _notified_update_version:
-                    _notified_update_version = latest_version
-                    app.notice(
-                        Status.Attention,
-                        "Update available",
-                        f"{latest_version} is available. Current version is {__version__}.",
-                        {
-                            "tag": "Button",
-                            "text": "Release",
-                            "attr": {
-                                "type": "link",
-                                "url": RELEASE_URL,
-                            },
-                            "child": [],
+            if has_update and latest_version != _notified_update_version:
+                _notified_update_version = latest_version
+                if _latest_installer_url:
+                    button = {
+                        "tag": "Button",
+                        "text": "Update",
+                        "attr": {
+                            "value": "vrcutil_update",
                         },
-                    )
-                return app.values.set("vrcutil_hasUpdate", Status.Attention if has_update else "")
+                        "child": [],
+                    }
+                else:
+                    button = {
+                        "tag": "Button",
+                        "text": "Release",
+                        "attr": {
+                            "type": "link",
+                            "url": _latest_release_url,
+                        },
+                        "child": [],
+                    }
+                app.notice(
+                    Status.Attention,
+                    "Update available",
+                    f"{latest_version} is available. Current version is {__version__}.",
+                    button,
+                    key=_update_notice_key,
+                )
+            return app.values.set("vrcutil_hasUpdate", Status.Attention if has_update else "")
         except Exception:
             logger.debug("Failed to check VRCUtil update", exc_info=True)
             app.values.set("vrcutil_latest", "failed")
@@ -406,6 +463,133 @@ def updateCheckLoop():
     while not _update_check_stop.wait(UPDATE_CHECK_INTERVAL):
         if app.values.get("settings_checkUpdate", False):
             checkUpdate()
+
+
+@app.onValueChange("vrcutil_update")
+def startUpdate(_key, _before, after):
+    global _latest_installer_url, _latest_release_url
+    if not after:
+        return
+
+    app.values.set("vrcutil_update", False, False)
+
+    if not _update_install_lock.acquire(blocking=False):
+        app.notice(
+            Status.Caution,
+            "Update in progress",
+            "A VRCUtil update is already being prepared.",
+            key=_update_notice_key,
+        )
+        return
+
+    app.notice(
+        Status.Attention,
+        "Preparing update",
+        "Checking the latest installer...",
+        key=_update_notice_key,
+    )
+
+    def worker():
+        temp_dir = None
+        try:
+            app.values.set("vrcutil_latest", "updating")
+            release = _fetch_latest_release()
+            _latest_installer_url = release["installer_url"]
+            _latest_release_url = release["html_url"]
+            latest_version = release["tag_name"]
+            if not _latest_installer_url:
+                raise FileNotFoundError(f"{INSTALLER_ASSET_NAME} was not found in the latest release.")
+
+            temp_dir = Path(tempfile.mkdtemp(prefix="VRCUtil-Update-"))
+            installer_path = temp_dir / INSTALLER_ASSET_NAME
+            request = urllib.request.Request(
+                _latest_installer_url,
+                headers={"User-Agent": f"VRCUtil/{__version__}"},
+            )
+            with urllib.request.urlopen(request, timeout=30) as response, installer_path.open("wb") as file:
+                try:
+                    total_bytes = int(response.headers.get("Content-Length") or 0)
+                except ValueError:
+                    total_bytes = 0
+
+                downloaded_bytes = 0
+                last_progress = -1
+                last_notice_time = 0.0
+                app.notice(
+                    Status.Attention,
+                    f"Downloading VRCUtil {latest_version}",
+                    "Downloading update: 0%",
+                    key=_update_notice_key,
+                )
+
+                while chunk := response.read(256 * 1024):
+                    file.write(chunk)
+                    downloaded_bytes += len(chunk)
+
+                    now = time.monotonic()
+                    if total_bytes:
+                        progress = min(100, int(downloaded_bytes * 100 / total_bytes))
+                        description = (
+                            f"Downloading update: {progress}% "
+                            f"({downloaded_bytes / 1024 / 1024:.1f} / {total_bytes / 1024 / 1024:.1f} MiB)"
+                        )
+                    else:
+                        progress = -1
+                        description = f"Downloading update: {downloaded_bytes / 1024 / 1024:.1f} MiB"
+
+                    if (progress != last_progress or not total_bytes) and (now - last_notice_time >= 0.15 or progress == 100):
+                        app.notice(
+                            Status.Attention,
+                            f"Downloading VRCUtil {latest_version}",
+                            description,
+                            key=_update_notice_key,
+                        )
+                        last_progress = progress
+                        last_notice_time = now
+
+            subprocess.Popen(
+                [
+                    str(installer_path),
+                    "--direct",
+                    "--path",
+                    str(INSTALL_PATH),
+                    *(["--debug"] if args.debug else []),
+                ],
+                cwd=temp_dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+
+            app.notice(
+                Status.Attention,
+                "Installing update",
+                f"Download complete. Starting VRCUtil {latest_version} installer...",
+                key=_update_notice_key,
+            )
+            time.sleep(0.25)
+            window_destroy(force=True)
+        except Exception as error:
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.error("Failed to start VRCUtil update\n%s", traceback.format_exc())
+            app.values.set("vrcutil_latest", "failed")
+            app.notice(
+                Status.Critical,
+                "Update failed",
+                str(error),
+                {
+                    "tag": "Button",
+                    "text": "Retry",
+                    "attr": {"value": "vrcutil_update"},
+                    "child": [],
+                },
+                key=_update_notice_key,
+            )
+        finally:
+            _update_install_lock.release()
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 @app.onValueChange("settings_autoStart")

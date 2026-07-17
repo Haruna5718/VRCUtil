@@ -2,7 +2,7 @@ import json
 import socket
 import pathlib
 import logging
-import datetime
+import time
 import zeroconf
 import threading
 import http.server
@@ -59,26 +59,34 @@ class EasyOSCUDPServer(osc_server.ThreadingOSCUDPServer):
             self.isactive = False
 
 class OSCQueryHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        key = (self.client_address[0], self.path)
-        now = datetime.datetime.now().timestamp()
-        if now - self.server.lastReq.get(key,0) < 1.0:
-            return
-        self.server.lastReq[key] = now
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({
-            "NAME": self.server.info.name.split(".")[0],
-            "OSC_IP": socket.inet_ntoa(self.server.info.addresses[0]),
-            "OSC_PORT": self.server.info.port,
-            "OSC_TRANSPORT": "UDP"
-        } if self.path.endswith("?HOST_INFO") else {
-            "CONTENTS": {
-                "avatar": {"FULL_PATH": "/avatar"},
-                "tracking": {"FULL_PATH": "/tracking"},
-            }
-        }).encode())
+	def do_GET(self):
+		key = (self.client_address[0], self.path)
+		now = time.monotonic()
+		if len(self.server.lastReq) >= 1024:
+			self.server.lastReq = {
+				stored_key: stored_at
+				for stored_key, stored_at in self.server.lastReq.items()
+				if now - stored_at < 1.0
+			}
+			if len(self.server.lastReq) >= 1024:
+				self.server.lastReq.clear()
+		if now - self.server.lastReq.get(key, 0) < 1.0:
+			return
+		self.server.lastReq[key] = now
+		self.send_response(200)
+		self.send_header("Content-type", "application/json")
+		self.end_headers()
+		self.wfile.write(json.dumps({
+			"NAME": self.server.info.name.split(".")[0],
+			"OSC_IP": socket.inet_ntoa(self.server.info.addresses[0]),
+			"OSC_PORT": self.server.info.port,
+			"OSC_TRANSPORT": "UDP"
+		} if self.path.endswith("?HOST_INFO") else {
+			"CONTENTS": {
+				"avatar": {"FULL_PATH": "/avatar"},
+				"tracking": {"FULL_PATH": "/tracking"},
+			}
+		}).encode())
 
 class EasyOSCQueryServer(http.server.HTTPServer):
     def __init__(self, server_address: tuple[str, int], name:str, host:str, port:int=None, bind_and_activate: bool = True):
@@ -152,10 +160,17 @@ class EasyOSC:
         logger.info(f"OSC with OSCQuery server listening {self.server.server_address[0]}:{self.server.server_address[1]}")
 
     def _stopServers(self):
-        if getattr(self.server,'isactive',False):
-            self.server.shutdown()
-        if getattr(self.oscquery,'isactive',False):
-            self.oscquery.shutdown()
+        server, oscquery = self.server, self.oscquery
+        self.server = None
+        self.oscquery = None
+        if getattr(server, "isactive", False):
+            server.shutdown()
+        if server is not None:
+            server.server_close()
+        if getattr(oscquery, "isactive", False):
+            oscquery.shutdown()
+        if oscquery is not None:
+            oscquery.server_close()
 
     def stop(self):
         self._stopServers()
